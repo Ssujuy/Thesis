@@ -5,17 +5,22 @@ from pathlib import Path
 
 DEFAULT_WINDOW_SIZE = 512          # fixed length 512 for DNABERT / CNN
 
-def readFasta(path: str):
+### we need to add a logic in this to correctly separate
+### positive from negative labels, probably from file path
+### non-coding smORFs ---> negative/sequences.fa and
+### coding smORFs ---> positive/sequences.fa
+
+def readFasta(path: str) -> None:
     """
     Generator that yields (header, cleaned_seq) for every record in the FASTA.
     """
     for record in SeqIO.parse(path, "fasta"):
         cleaned = cleanup(record.seq)
-        return record.id, cleaned
+        toCsv(cleaned, 0)
 
     
 
-def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE):
+def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE) -> str:
     """
     Return an upper-case, ambiguity-free DNA string of exactly pad_to length.
     Truncates if longer, pads with 'N' tokens if shorter.
@@ -35,7 +40,7 @@ def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE):
 
     return seq
 
-def toCsv(label: int, sequence: str, filepath: str = "train.csv"):
+def toCsv(sequence: str, label: str, filepath: str = "train.csv") -> None:
 
     filepath = Path(filepath)
     exists = filepath.exists()
@@ -45,16 +50,16 @@ def toCsv(label: int, sequence: str, filepath: str = "train.csv"):
         writer = csv.writer(file)
 
         if not exists:
-            writer.writerow(["label", "sequence"])
+            writer.writerow(["Sequence", "Label"])
         
-        writer.writerows([label, sequence])
+        writer.writerow([sequence, label])
 
 def main(filepath: str = ""):
     
     print(f"Reading FASTA file: {filepath}")
-    id,seq = readFasta(filepath)
-    print(seq + "..." )
-    print(f"length = {len(seq)}\n")
+    readFasta(filepath)
+    # print(seq + "..." )
+    # print(f"length = {len(seq)}\n")
 
 
 if __name__ == "__main__":
