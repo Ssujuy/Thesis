@@ -16,7 +16,7 @@ def readFasta(path: str) -> None:
     """
     for record in SeqIO.parse(path, "fasta"):
         cleaned = cleanup(record.seq)
-        toCsv(cleaned, 0)
+        toCsv(cleaned, 1)
 
     
 
