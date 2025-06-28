@@ -6,7 +6,13 @@ from transformers import (
     DataCollatorWithPadding
 )
 from datasets import load_dataset
-from sklearn.metrics import f1_score
+from sklearn.metrics import (
+    f1_score,
+    accuracy_score,
+    log_loss,
+    precision_recall_fscore_support,
+)
+
 import numpy as np, torch
 from pathlib import Path
 
@@ -14,16 +20,22 @@ class DNABERT6:
 
     def __init__(
                 self,
-                modelID: str = "zhihan1996/DNA_bert_6",
-                trainingDataPath: str = "train.csv",
-                epochs: int = 4,
-                learningRate: float = 2e-5,
-                windowSize: int = 512
+                modelID: str            = "zhihan1996/DNA_bert_6",
+                trainingDataPath: str   = "train.csv",
+                epochs: int             = 4,
+                learningRate: float     = 2e-5,
+                windowSize: int         = 512,
+                weightDecay: float      = 0.01,
+                warmupRatio: float      = 0.1
             ):
 
         # tokenizer and model (with classification head)
 
         self.tokenizer = AutoTokenizer.from_pretrained(modelID)
+
+        # For finding coding - non-coding smORFs we need classification, thus
+        # nothing is frozen, backbone + classifier head all have requires_grad=True
+
         self.model     = AutoModelForSequenceClassification.from_pretrained(modelID, num_labels=2)
 
         #initialize dataset from our previously created csv file
@@ -33,6 +45,8 @@ class DNABERT6:
         self.windowSize = windowSize
         self.learningRate = learningRate
         self.epochs = epochs
+        self.weightDecay = weightDecay
+        self.warmupRatio = warmupRatio
 
         # tokenise every row with DNABERT's tokenizer
 
@@ -58,32 +72,31 @@ class DNABERT6:
             Fine-tune the model.  Override epochs/LR by passing
             finetune(epochs=4, learning_rate=2e-5).
             """
-            epochs = override.get("epochs", self.epochs)
-            lr = override.get("learning_rate", self.learningRate)
 
             args = TrainingArguments(
-                output_dir                 = outDirectory,
-                num_train_epochs           = epochs,
-                per_device_train_batch_size= 8,
-                per_device_eval_batch_size = 16,
-                learning_rate              = lr,
-                weight_decay               = 0.01,
-                warmup_ratio               = 0.1,
-                eval_strategy              = "epoch",
-                save_strategy              = "epoch",
-                logging_steps              = 10,
-                load_best_model_at_end     = True,
-                metric_for_best_model      = "f1",
+                output_dir                  = outDirectory,
+                num_train_epochs            = self.epochs,
+                per_device_train_batch_size = 8,
+                per_device_eval_batch_size  = 16,
+                learning_rate               = self.learningRate,
+                weight_decay                = self.weightDecay,
+                warmup_ratio                = self.warmupRatio,
+                eval_strategy               = "epoch",
+                save_strategy               = "epoch",
+                logging_steps               = 10,
+                load_best_model_at_end      = True,
+                metric_for_best_model       = "f1",
             )
 
             trainer = Trainer(
                 self.model,
                 args,
-                train_dataset=self.dataset["train"],
-                eval_dataset=self.dataset["validation"],
-                data_collator=DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
-                compute_metrics=self.compute_metrics,
+                train_dataset               = self.dataset["train"],
+                eval_dataset                = self.dataset["validation"],
+                data_collator               = DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
+                compute_metrics             = self.compute_metrics,
             )
+
             trainer.train()
             trainer.save_model(outDirectory)
             self.tokenizer.save_pretrained(outDirectory)
