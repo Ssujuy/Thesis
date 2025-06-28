@@ -16,7 +16,7 @@ def readFasta(path: str) -> None:
     """
     for record in SeqIO.parse(path, "fasta"):
         cleaned = cleanup(record.seq)
-        toCsv(cleaned, 1)
+        toCsv(cleaned, 0)
 
     
 
@@ -40,7 +40,7 @@ def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE) -> str:
 
     return seq
 
-def toCsv(sequence: str, label: str, filepath: str = "train.csv") -> None:
+def toCsv(sequence: str, label: int, filepath: str = "train.csv") -> None:
 
     filepath = Path(filepath)
     exists = filepath.exists()
@@ -50,7 +50,7 @@ def toCsv(sequence: str, label: str, filepath: str = "train.csv") -> None:
         writer = csv.writer(file)
 
         if not exists:
-            writer.writerow(["Sequence", "Label"])
+            writer.writerow(["sequence", "label"])
         
         writer.writerow([sequence, label])
 
