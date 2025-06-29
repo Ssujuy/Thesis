@@ -12,9 +12,10 @@ from sklearn.metrics import (
     log_loss,
     precision_recall_fscore_support,
 )
-
+import pandas as pd
 import numpy as np, torch
 from pathlib import Path
+import json, pickle
 
 class DNABERT6:
 
@@ -48,6 +49,9 @@ class DNABERT6:
         self.weightDecay = weightDecay
         self.warmupRatio = warmupRatio
 
+        self.trainer = None
+        self.arguments = None
+
         # tokenise every row with DNABERT's tokenizer
 
         self.dataset = self.dataset.map(
@@ -59,13 +63,32 @@ class DNABERT6:
         # create PyTorch tensors
         self.dataset.set_format(type="torch")
 
+    def metrics(self, eval_pred):
+        """
+        Function given to Trainer to evaluate metrics: 
+        accuracy, f1_score, loss, precision.
+        """
+        logits, labels = eval_pred
+        preds  = np.argmax(logits, axis=-1)
+
+        acc  = accuracy_score(labels, preds)
+        f1   = f1_score(labels, preds)
+        prec, rec, _, _ = precision_recall_fscore_support(labels, preds, average="binary", zero_division=0)
+        ce_loss = log_loss(labels, torch.softmax(torch.tensor(logits), dim=-1))
+
+        return {
+            "accuracy": acc,
+            "precision": prec,
+            "recall": rec,
+            "f1": f1,
+            "cross_entropy": ce_loss,
+        } 
+
     def encode(self, batch):
         return self.tokenizer(batch["sequence"], truncation=True, padding="max_length", max_length=self.windowSize)
 
-    def compute_metrics(self, eval_pred):
-        logits, labels = eval_pred
-        preds = np.argmax(logits, axis=-1)
-        return {"f1": f1_score(labels, preds)}
+    def predict(self) -> None:
+        return None
 
     def finetune(self, outDirectory="dnabert6_smorfs_ft", **override):
             """
@@ -73,7 +96,7 @@ class DNABERT6:
             finetune(epochs=4, learning_rate=2e-5).
             """
 
-            args = TrainingArguments(
+            self.args = TrainingArguments(
                 output_dir                  = outDirectory,
                 num_train_epochs            = self.epochs,
                 per_device_train_batch_size = 8,
@@ -88,21 +111,55 @@ class DNABERT6:
                 metric_for_best_model       = "f1",
             )
 
-            trainer = Trainer(
+            self.trainer = Trainer(
                 self.model,
-                args,
+                self.args,
                 train_dataset               = self.dataset["train"],
                 eval_dataset                = self.dataset["validation"],
                 data_collator               = DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
-                compute_metrics             = self.compute_metrics,
+                compute_metrics             = self.metrics,
             )
 
-            trainer.train()
-            trainer.save_model(outDirectory)
+            self.trainer.train()
+            self.trainer.save_model(outDirectory)
             self.tokenizer.save_pretrained(outDirectory)
             print(f"✓ Fine-tuned model saved to  {Path(outDirectory).resolve()}")
 
+    def load(self, modelPath: str):
+        """
+        Fully restore a fine-tuned checkpoint:
 
+        • tokenizer.json, vocab.txt          → self.tokenizer
+        • model.safetensors / pytorch_model  → self.model
+        • training_args.bin                  → self.args  (and member vars)
+        """
+        path = Path(modelPath)
+
+        # 1️⃣  tokenizer  +  model
+        self.tokenizer = AutoTokenizer.from_pretrained(path)
+        self.model     = AutoModelForSequenceClassification.from_pretrained(path)
+        self.model.eval()
+
+        # 2️⃣  training arguments
+        ta_path = path / "training_args.bin"
+        if ta_path.exists():
+            self.args = torch.load(ta_path)
+            # pull the key hyper-params back into the object
+            self.epochs       = int(self.args.num_train_epochs)
+            self.learningRate = float(self.args.learning_rate)
+            self.windowSize   = int(self.args.max_length or 512)
+            self.weightDecay  = float(self.args.weight_decay)
+            self.warmupRatio  = float(self.args.warmup_ratio)
+        else:
+            self.args = None   # if you saved only the model weights
+
+        print("✓ Loaded everything from", path.resolve())
+
+    def history(self) -> pd.DataFrame:
+
+        history = self.trainer.state.log_history
+        return pd.DataFrame(history)
+    
     def help(self) -> None:
 
         help(self.model)
@@ -121,3 +178,7 @@ class DNABERT6:
         
 model = DNABERT6()
 model.finetune()
+
+pd.set_option("display.max_rows", None)    # show all rows
+pd.set_option("display.max_columns", None) # show all columns
+print(model.history())
