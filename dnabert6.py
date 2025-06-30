@@ -63,6 +63,13 @@ class DNABERT6:
         # create PyTorch tensors
         self.dataset.set_format(type="torch")
 
+    def _poolHidden(self, hidden):
+        """
+        hidden : (B, L, 768)  – last_hidden_state from DNABERT
+        """
+
+        return hidden[:, 0, :]
+
     def metrics(self, eval_pred):
         """
         Function given to Trainer to evaluate metrics: 
@@ -87,8 +94,43 @@ class DNABERT6:
     def encode(self, batch):
         return self.tokenizer(batch["sequence"], truncation=True, padding="max_length", max_length=self.windowSize)
 
-    def predict(self) -> None:
-        return None
+    def embeddings(
+            self,
+            sequences,
+            projectDim = 768,
+            batchSize = 32,
+            device = "cpu"
+            ):
+        
+        """
+        Return an (N, D) NumPy matrix of embeddings.
+        """
+
+        self.model.eval()
+        self.model.to(device)
+
+        vecs = np.empty((len(sequences), projectDim), dtype=np.float32)
+
+        with torch.no_grad():
+
+            for i in range(0, len(sequences), batchSize):
+
+                batch = sequences[i : i + batchSize]
+                toks  = self.tokenizer(
+                    batch,
+                    truncation=True,
+                    padding="max_length",
+                    max_length=self.windowSize,
+                    return_tensors="pt"
+                ).to(device)
+                                
+                hidden = self.model.base_model(**toks).last_hidden_state
+                pooled = self._poolHidden(hidden)
+
+                vecs[idx : idx + pooled.size(0)] = pooled.cpu().numpy()
+                idx += pooled.size(0)
+
+        return vecs
 
     def finetune(self, outDirectory="dnabert6_smorfs_ft", **override):
             """
@@ -135,21 +177,26 @@ class DNABERT6:
         """
         path = Path(modelPath)
 
-        # 1️⃣  tokenizer  +  model
+        # initialize tokenizer and model
+
         self.tokenizer = AutoTokenizer.from_pretrained(path)
         self.model     = AutoModelForSequenceClassification.from_pretrained(path)
         self.model.eval()
 
-        # 2️⃣  training arguments
+        # initialize training arguments
+
         ta_path = path / "training_args.bin"
         if ta_path.exists():
             self.args = torch.load(ta_path)
+
             # pull the key hyper-params back into the object
+
             self.epochs       = int(self.args.num_train_epochs)
             self.learningRate = float(self.args.learning_rate)
             self.windowSize   = int(self.args.max_length or 512)
             self.weightDecay  = float(self.args.weight_decay)
             self.warmupRatio  = float(self.args.warmup_ratio)
+
         else:
             self.args = None   # if you saved only the model weights
 
