@@ -17,6 +17,12 @@ import numpy as np, torch
 from pathlib import Path
 import json, pickle
 
+### TO TEST
+### Load function
+### embedding function
+### addition for embeddings linear projection
+### Mean embeddings withour cls token
+
 class DNABERT6:
 
     def __init__(
