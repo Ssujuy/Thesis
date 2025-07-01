@@ -1,5 +1,5 @@
 START_CODON = "ATG"
-STOP_CODON = ""
+STOP_CODON = {"TAA", "TAG", "TGA"}
 
 def hexamerScore():
 
@@ -15,6 +15,6 @@ def orfLength(sequence: str) -> int:
     else:
         for i in range(startCodon, len(sequence), 3):
             codon = sequence[i:i+3]
-            if codon in {"TAA", "TAG", "TGA"}:
+            if codon in STOP_CODON:
                 return i + 3 - startCodon
         return len(sequence) - startCodon
