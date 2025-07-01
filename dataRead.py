@@ -2,21 +2,20 @@ import argparse
 import csv
 from Bio import SeqIO
 from pathlib import Path
+from computationalFeatures import orfLength
 
 DEFAULT_WINDOW_SIZE = 512          # fixed length 512 for DNABERT / CNN
 
-### we need to add a logic in this to correctly separate
-### positive from negative labels, probably from file path
-### non-coding smORFs ---> negative/sequences.fa and
-### coding smORFs ---> positive/sequences.fa
+### are padding only on the right??
 
-def readFasta(path: str) -> None:
+def readFasta(path: str, label: int) -> None:
     """
     Generator that yields (header, cleaned_seq) for every record in the FASTA.
     """
     for record in SeqIO.parse(path, "fasta"):
+        orfLen = orfLength(record.seq)
         cleaned = cleanup(record.seq)
-        toCsv(cleaned, 0)
+        toCsv(cleaned, label, orfLen)
 
     
 
@@ -40,7 +39,7 @@ def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE) -> str:
 
     return seq
 
-def toCsv(sequence: str, label: int, filepath: str = "train.csv") -> None:
+def toCsv(sequence: str, label: int, orfLength: int, filepath: str = "train.csv") -> None:
 
     filepath = Path(filepath)
     exists = filepath.exists()
@@ -50,23 +49,24 @@ def toCsv(sequence: str, label: int, filepath: str = "train.csv") -> None:
         writer = csv.writer(file)
 
         if not exists:
-            writer.writerow(["sequence", "label"])
+            writer.writerow(["sequence", "label", "ORF length"])
         
-        writer.writerow([sequence, label])
+        writer.writerow([sequence, label, orfLength])
 
-def main(filepath: str = ""):
+def main(codingFasta: str = "", nonCodingFasta: str = ""):
     
-    print(f"Reading FASTA file: {filepath}")
-    readFasta(filepath)
-    # print(seq + "..." )
-    # print(f"length = {len(seq)}\n")
+    print(f"Reading FASTA file for coding smORFs: {codingFasta} and non-coding smORFs: {nonCodingFasta}")
+    readFasta(codingFasta, 1)
+    readFasta(nonCodingFasta, 0)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("filepath", type=str,
-                        help="Path to the input FASTA file")
+    parser.add_argument("codingFASTA", type=str,
+                        help="Path to the input FASTA file for coding smORFs")
+    parser.add_argument("nonCodingFASTA", type=str,
+                        help="Path to the input FASTA file for non-coding smORFs")
     
     args = parser.parse_args()
     
-    main(filepath=args.filepath)
+    main(codingFasta=args.codingFASTA, nonCodingFasta=args.nonCodingFASTA)

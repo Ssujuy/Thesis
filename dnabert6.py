@@ -21,7 +21,24 @@ import json, pickle
 ### Load function
 ### embedding function
 ### addition for embeddings linear projection
+
+### read fasta file for prediction. 
+
+# if proj_dim is not None:
+#     linear = torch.nn.Linear(768, proj_dim, bias=False)
+#     torch.nn.init.xavier_uniform_(linear.weight)
+
+# pooled = self._pool_hidden(...)          # (B, 768)
+# if linear is not None:
+#     pooled = F.relu(linear(pooled))      # (B, proj_dim)
+# vecs[idx : idx + pooled.size(0)] = pooled.cpu().numpy()
+
 ### Mean embeddings withour cls token
+
+# mask   = attention_mask.unsqueeze(-1)      # (B, L, 1)
+# summed = (hidden[:, 1:, :] * mask[:, 1:, :]).sum(1)
+# counts = mask[:, 1:, :].sum(1).clamp(min=1e-9)
+# return summed / counts         
 
 class DNABERT6:
 
@@ -116,7 +133,7 @@ class DNABERT6:
         self.model.to(device)
 
         vecs = np.empty((len(sequences), projectDim), dtype=np.float32)
-
+        idx = 0
         with torch.no_grad():
 
             for i in range(0, len(sequences), batchSize):
@@ -234,4 +251,8 @@ model.finetune()
 
 pd.set_option("display.max_rows", None)    # show all rows
 pd.set_option("display.max_columns", None) # show all columns
-print(model.history())
+seq = "ATGGAAACGTTACTGACCTGAGGTCGTTGACCATGGTGAACTGCAGTACGGTACCGTCCGATGTTGACTACGGCTACGTAGTGAACC"        # 90 bp total
+
+emb = model.embeddings([seq])          # shape (1, 768)
+print(emb.shape)
+print(emb)                     # first 10 dims for sanity
