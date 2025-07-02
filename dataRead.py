@@ -2,7 +2,7 @@ import argparse
 import csv
 from Bio import SeqIO
 from pathlib import Path
-from computationalFeatures import orfLength
+from computationalFeatures import firstORFLength
 
 DEFAULT_WINDOW_SIZE = 512          # fixed length 512 for DNABERT / CNN
 
@@ -13,7 +13,7 @@ def readFasta(path: str, label: int) -> None:
     Generator that yields (header, cleaned_seq) for every record in the FASTA.
     """
     for record in SeqIO.parse(path, "fasta"):
-        orfLen = orfLength(record.seq)
+        orfLen = firstORFLength(record.seq)
         cleaned = cleanup(record.seq)
         toCsv(cleaned, label, orfLen)
 
