@@ -18,8 +18,6 @@ from pathlib import Path
 import json, pickle
 
 ### TO TEST
-### Load function
-### embedding function
 ### addition for embeddings linear projection
 
 ### read fasta file for prediction. 
@@ -60,7 +58,7 @@ class DNABERT6:
         # For finding coding - non-coding smORFs we need classification, thus
         # nothing is frozen, backbone + classifier head all have requires_grad=True
 
-        self.model     = AutoModelForSequenceClassification.from_pretrained(modelID, num_labels=2)
+        self.model = AutoModelForSequenceClassification.from_pretrained(modelID, num_labels=2)
 
         #initialize dataset from our previously created csv file
 
@@ -88,7 +86,7 @@ class DNABERT6:
 
     def _poolHidden(self, hidden):
         """
-        hidden : (B, L, 768)  – last_hidden_state from DNABERT
+        hidden : (B, L, 768) - last_hidden_state from DNABERT
         """
 
         return hidden[:, 0, :]
@@ -126,7 +124,8 @@ class DNABERT6:
             ):
         
         """
-        Return an (N, D) NumPy matrix of embeddings.
+        Return an (N, D) NumPy matrix of embeddings. Default size
+        of embeddings returned from dnabert6 model is 768.
         """
 
         self.model.eval()
@@ -157,8 +156,8 @@ class DNABERT6:
 
     def finetune(self, outDirectory="dnabert6_smorfs_ft", **override):
             """
-            Fine-tune the model.  Override epochs/LR by passing
-            finetune(epochs=4, learning_rate=2e-5).
+            Fine-tune the dnabert 6 model, coding and non-coding
+            labeled smORFs taken from our train.csv
             """
 
             self.args = TrainingArguments(
@@ -194,9 +193,9 @@ class DNABERT6:
         """
         Fully restore a fine-tuned checkpoint:
 
-        • tokenizer.json, vocab.txt          → self.tokenizer
-        • model.safetensors / pytorch_model  → self.model
-        • training_args.bin                  → self.args  (and member vars)
+        • tokenizer.json, vocab.txt, self.tokenizer member variable
+        • model.safetensors / pytorch_model, self.model member variable
+        • training_args.bin, self.args and other member variables
         """
         path = Path(modelPath)
 
@@ -208,17 +207,16 @@ class DNABERT6:
 
         # initialize training arguments
 
-        ta_path = path / "training_args.bin"
-        if ta_path.exists():
-            self.args = torch.load(ta_path)
+        argsPath = path/"training_args.bin"
+        if argsPath.exists():
+            self.args = torch.load(argsPath, weights_only=False)
 
             # pull the key hyper-params back into the object
 
-            self.epochs       = int(self.args.num_train_epochs)
+            self.epochs = int(self.args.num_train_epochs)
             self.learningRate = float(self.args.learning_rate)
-            self.windowSize   = int(self.args.max_length or 512)
-            self.weightDecay  = float(self.args.weight_decay)
-            self.warmupRatio  = float(self.args.warmup_ratio)
+            self.weightDecay = float(self.args.weight_decay)
+            self.warmupRatio = float(self.args.warmup_ratio)
 
         else:
             self.args = None   # if you saved only the model weights
@@ -247,12 +245,13 @@ class DNABERT6:
         print(self.model.config)
         
 model = DNABERT6()
-model.finetune()
+model.load("dnabert6_smorfs_ft")
+# model.finetune()
 
-pd.set_option("display.max_rows", None)    # show all rows
-pd.set_option("display.max_columns", None) # show all columns
-seq = "ATGGAAACGTTACTGACCTGAGGTCGTTGACCATGGTGAACTGCAGTACGGTACCGTCCGATGTTGACTACGGCTACGTAGTGAACC"        # 90 bp total
+# pd.set_option("display.max_rows", None)    # show all rows
+# pd.set_option("display.max_columns", None) # show all columns
+# seq = "ATGGAAACGTTACTGACCTGAGGTCGTTGACCATGGTGAACTGCAGTACGGTACCGTCCGATGTTGACTACGGCTACGTAGTGAACC"        # 90 bp total
 
-emb = model.embeddings([seq])          # shape (1, 768)
-print(emb.shape)
-print(emb)                     # first 10 dims for sanity
+# emb = model.embeddings([seq])          # shape (1, 768)
+# print(emb.shape)
+# print(emb)                     # first 10 dims for sanity
