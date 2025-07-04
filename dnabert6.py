@@ -15,9 +15,8 @@ from sklearn.metrics import (
 import pandas as pd
 import numpy as np, torch
 from pathlib import Path
-from Types import HiddenState
+from Types import HiddenState, ProjectionState
 import Types as tp
-from Types import ProjectionState
 import torch.nn.functional as F
 
 ### The projection to fixed size needs to be tested with real data coding, non coding
