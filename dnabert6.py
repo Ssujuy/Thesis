@@ -15,7 +15,8 @@ from sklearn.metrics import (
 import pandas as pd
 import numpy as np, torch
 from pathlib import Path
-import json, pickle
+import Types as tp
+from Types import ProjectionState
 
 ### TO TEST
 ### addition for embeddings linear projection
@@ -42,13 +43,17 @@ class DNABERT6:
 
     def __init__(
                 self,
-                modelID: str            = "zhihan1996/DNA_bert_6",
-                trainingDataPath: str   = "train.csv",
-                epochs: int             = 4,
-                learningRate: float     = 2e-5,
-                windowSize: int         = 512,
-                weightDecay: float      = 0.01,
-                warmupRatio: float      = 0.1
+                modelID: str                        = "zhihan1996/DNA_bert_6",
+                trainingDataPath: str               = "train.csv",
+                epochs: int                         = 4,
+                learningRate: float                 = 2e-5,
+                windowSize: int                     = 512,
+                weightDecay: float                  = 0.01,
+                warmupRatio: float                  = 0.1,
+                device: str                         = "cpu",
+                projectionState: ProjectionState    = ProjectionState.NO_PROJECTION,
+                projectionDimension: int            = None
+
             ):
 
         # tokenizer and model (with classification head)
@@ -58,7 +63,40 @@ class DNABERT6:
         # For finding coding - non-coding smORFs we need classification, thus
         # nothing is frozen, backbone + classifier head all have requires_grad=True
 
+        # Device cuda or cpu
+
+        self.device = device
+
         self.model = AutoModelForSequenceClassification.from_pretrained(modelID, num_labels=2)
+
+        # Inititalize projection state, projection dimension and projection member variables
+
+        self.projectionState = projectionState
+        self.projectionDimension = None
+        self.linear = None
+
+        if self.projectionState == ProjectionState.NO_PROJECTION:
+            self.projectionDimension = tp.DEFAULT_PROJECTION_DIMENSION
+
+        elif self.projectionState != ProjectionState.NO_PROJECTION and self.projectionDimension == None:
+            self.projectionState = ProjectionState.NO_PROJECTION
+            self.projectionDimension = tp.DEFAULT_PROJECTION_DIMENSION
+
+        elif self.projectionState == ProjectionState.NOT_TRAINABLE:
+            self.projectionDimension = projectionDimension
+
+            # frozen projection (built each call, no grad)
+            self.linear = torch.nn.Linear(tp.DEFAULT_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
+            torch.nn.init.xavier_uniform_(self.linear.weight)
+            for p in self.linear.parameters():
+                p.requires_grad = False
+
+        elif self.projectionState == ProjectionState.TRAINABLE:
+            self.projectionDimension = projectionDimension
+
+            #trainable projection
+            self.linear = torch.nn.Linear(tp.DEFAULT_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
+            torch.nn.init.xavier_uniform_(self.linear.weight)
 
         #initialize dataset from our previously created csv file
 
@@ -245,7 +283,7 @@ class DNABERT6:
         print(self.model.config)
         
 model = DNABERT6()
-model.load("dnabert6_smorfs_ft")
+# model.load("dnabert6_smorfs_ft")
 # model.finetune()
 
 # pd.set_option("display.max_rows", None)    # show all rows
