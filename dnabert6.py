@@ -17,28 +17,11 @@ import numpy as np, torch
 from pathlib import Path
 import Types as tp
 from Types import ProjectionState
+import torch.nn.functional as F
 
-### TO TEST
-### addition for embeddings linear projection
+### The projection to fixed size needs to be tested with real data coding, non coding
 
 ### read fasta file for prediction. 
-
-# if proj_dim is not None:
-#     linear = torch.nn.Linear(768, proj_dim, bias=False)
-#     torch.nn.init.xavier_uniform_(linear.weight)
-
-# pooled = self._pool_hidden(...)          # (B, 768)
-# if linear is not None:
-#     pooled = F.relu(linear(pooled))      # (B, proj_dim)
-# vecs[idx : idx + pooled.size(0)] = pooled.cpu().numpy()
-
-### Mean embeddings withour cls token
-
-# mask   = attention_mask.unsqueeze(-1)      # (B, L, 1)
-# summed = (hidden[:, 1:, :] * mask[:, 1:, :]).sum(1)
-# counts = mask[:, 1:, :].sum(1).clamp(min=1e-9)
-# return summed / counts         
-
 class DNABERT6:
 
     def __init__(
@@ -186,6 +169,9 @@ class DNABERT6:
                                 
                 hidden = self.model.base_model(**toks).last_hidden_state
                 pooled = self._poolHidden(hidden)
+
+                if self.linear is not None:
+                    pooled = F.relu(self.linear(pooled))
 
                 vecs[idx : idx + pooled.size(0)] = pooled.cpu().numpy()
                 idx += pooled.size(0)
