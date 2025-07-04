@@ -8,3 +8,8 @@ class ProjectionState(Enum):
     NOT_TRAINABLE = 1
     TRAINABLE = 2
 
+class HiddenState(Enum):
+
+    CLS     = 0,
+    MEAN    = 1,
+    BOTH    = 2

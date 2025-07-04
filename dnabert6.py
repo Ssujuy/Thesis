@@ -15,6 +15,7 @@ from sklearn.metrics import (
 import pandas as pd
 import numpy as np, torch
 from pathlib import Path
+from Types import HiddenState
 import Types as tp
 from Types import ProjectionState
 import torch.nn.functional as F
@@ -105,12 +106,53 @@ class DNABERT6:
         # create PyTorch tensors
         self.dataset.set_format(type="torch")
 
-    def _poolHidden(self, hidden):
+    def _poolHidden(self, hidden, attentionMask, state: HiddenState):
         """
         hidden : (B, L, 768) - last_hidden_state from DNABERT
+        
+        - For state CLS the CLs embeddings from DNABERT6 are returned.
+        (B, 768)
+
+        - For state MEAN a mean of all embeddings is calculated excluding 
+        embeddings from the CLS token.
+        (B, 768)
+
+        - For state BOTH the 2 embeddings of CLS and MEAN are concatenated.
+        (B, 1536)
         """
 
-        return hidden[:, 0, :]
+        if state == HiddenState.CLS:
+
+            return hidden[:, 0, :]
+        
+        elif state == HiddenState.MEAN:
+
+            # mask : (B, L, 1) → 1 for real tokens, 0 for padding
+            mask = attentionMask.unsqueeze(-1)
+
+            # exclude [CLS] column (index 0)
+            real = hidden[:, 1:, :] * mask[:, 1:, :]     # zero-out pads
+
+            summed = real.sum(1)                           # (B, 768)
+            counts = mask[:, 1:, :].sum(1).clamp(min=1e-9) # (B, 1)
+            mean = summed / counts                       # (B, 768)
+
+            return mean
+
+        elif state == HiddenState.BOTH:
+
+            # Re-use the two branches above
+            cls_vec  = self._poolHidden(hidden, attentionMask, HiddenState.CLS)
+            mean_vec = self._poolHidden(hidden, attentionMask, HiddenState.MEAN)
+
+            combined = torch.cat([cls_vec, mean_vec], dim=-1)  # (B, 1536)
+            return combined
+
+        else:
+            raise ValueError("state must be CLS, MEAN or BOTH")
+
+
+
 
     def metrics(self, eval_pred):
         """
@@ -166,9 +208,11 @@ class DNABERT6:
                     max_length=self.windowSize,
                     return_tensors="pt"
                 ).to(device)
+
+                attentionMask = toks["attention_mask"]
                                 
                 hidden = self.model.base_model(**toks).last_hidden_state
-                pooled = self._poolHidden(hidden)
+                pooled = self._poolHidden(hidden, attentionMask, HiddenState.CLS)
 
                 if self.linear is not None:
                     pooled = F.relu(self.linear(pooled))
