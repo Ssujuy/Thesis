@@ -28,6 +28,7 @@ class DNABERT6:
                 self,
                 modelID: str                        = "zhihan1996/DNA_bert_6",
                 trainingDataPath: str               = "train.csv",
+                trainDatasetPercentage              = 100,
                 epochs: int                         = 4,
                 learningRate: float                 = 2e-5,
                 windowSize: int                     = 512,
@@ -89,9 +90,9 @@ class DNABERT6:
 
         #initialize dataset from our previously created csv file
 
-        #self.dataset = load_dataset("csv", data_files={"train": trainingDataPath, "validation": trainingDataPath})
+        self.trainingDatasetPercentage = trainDatasetPercentage
 
-        fullDataset = load_dataset("csv",data_files=trainingDataPath,split="train")
+        fullDataset = load_dataset("csv",data_files=trainingDataPath,split=f"train[:{self.trainingDatasetPercentage}%]")
         split = fullDataset.train_test_split(test_size=0.20,shuffle=True,seed=42)
 
         self.trainDataset = split["train"]
@@ -110,14 +111,12 @@ class DNABERT6:
 
         # tokenise every row with DNABERT's tokenizer
 
-        self.dataset = self.dataset.map(
-            self.encode,
-            batched=True,
-            remove_columns=["sequence"]
-        )
+        self.trainDataset = self.trainDataset.map(self.encode, batched=True, remove_columns=["sequence"])
+        self.validationDataset = self.validationDataset.map(self.encode, batched=True, remove_columns=["sequence"])
 
         # create PyTorch tensors
-        self.dataset.set_format(type="torch")
+        self.trainDataset.set_format(type="torch")
+        self.validationDataset.set_format(type="torch")
 
     def _poolHidden(self, hidden, attentionMask, state: HiddenState):
         """
@@ -322,7 +321,7 @@ class DNABERT6:
 
         print(self.model.config)
         
-model = DNABERT6()
+model = DNABERT6(trainDatasetPercentage=1)
 # model.load("dnabert6_smorfs_ft")
 model.finetune()
 
