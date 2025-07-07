@@ -89,7 +89,13 @@ class DNABERT6:
 
         #initialize dataset from our previously created csv file
 
-        self.dataset = load_dataset("csv", data_files={"train": trainingDataPath, "validation": trainingDataPath})
+        #self.dataset = load_dataset("csv", data_files={"train": trainingDataPath, "validation": trainingDataPath})
+
+        fullDataset = load_dataset("csv",data_files=trainingDataPath,split="train")
+        split = fullDataset.train_test_split(test_size=0.20,shuffle=True,seed=42)
+
+        self.trainDataset = split["train"]
+        self.validationDataset = split["test"]
 
         self.windowSize = windowSize
         self.learningRate = learningRate
@@ -158,9 +164,6 @@ class DNABERT6:
         else:
             raise ValueError("state must be CLS, MEAN or BOTH")
 
-
-
-
     def metrics(self, eval_pred):
         """
         Function given to Trainer to evaluate metrics: 
@@ -209,8 +212,8 @@ class DNABERT6:
             self.trainer = Trainer(
                 self.model,
                 self.args,
-                train_dataset               = self.dataset["train"],
-                eval_dataset                = self.dataset["validation"],
+                train_dataset               = self.trainDataset,
+                eval_dataset                = self.validationDataset,
                 data_collator               = DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
                 compute_metrics             = self.metrics,
             )
