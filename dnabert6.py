@@ -35,8 +35,8 @@ class DNABERT6:
                 warmupRatio: float                  = 0.1,
                 device: str                         = "cpu",
                 projectionState: ProjectionState    = ProjectionState.NO_PROJECTION,
-                projectionDimension: int            = None
-
+                projectionDimension: int            = None,
+                hiddenState: HiddenState            = HiddenState.CLS
             ):
 
         # tokenizer and model (with classification head)
@@ -51,6 +51,10 @@ class DNABERT6:
         self.device = device
 
         self.model = AutoModelForSequenceClassification.from_pretrained(modelID, num_labels=2)
+
+        # Initialize hidden state (CLS,MEAN,BOTH)
+
+        self.hiddenState = hiddenState
 
         # Inititalize projection state, projection dimension and projection member variables
 
@@ -211,7 +215,7 @@ class DNABERT6:
                 attentionMask = toks["attention_mask"]
                                 
                 hidden = self.model.base_model(**toks).last_hidden_state
-                pooled = self._poolHidden(hidden, attentionMask, HiddenState.CLS)
+                pooled = self._poolHidden(hidden, attentionMask, self.hiddenState)
 
                 if self.linear is not None:
                     pooled = F.relu(self.linear(pooled))
