@@ -33,6 +33,8 @@ class DNABERT6:
                 windowSize: int                     = 512,
                 weightDecay: float                  = 0.01,
                 warmupRatio: float                  = 0.1,
+                fineTuneEvalBatchSize               = 8,
+                fineTuneTrainBatchSize              = 8,
                 device: str                         = "cpu",
                 projectionState: ProjectionState    = ProjectionState.NO_PROJECTION,
                 projectionDimension: int            = None,
@@ -94,6 +96,8 @@ class DNABERT6:
         self.epochs = epochs
         self.weightDecay = weightDecay
         self.warmupRatio = warmupRatio
+        self.fineTuneTrainBatchSize = fineTuneTrainBatchSize
+        self.fineTuneEvalBatchSize = fineTuneEvalBatchSize
 
         self.trainer = None
         self.arguments = None
@@ -181,6 +185,41 @@ class DNABERT6:
     def encode(self, batch):
         return self.tokenizer(batch["sequence"], truncation=True, padding="max_length", max_length=self.windowSize)
 
+    def finetune(self, outDirectory="dnabert6_smorfs_ft", **override):
+            """
+            Fine-tune the dnabert 6 model, coding and non-coding
+            labeled smORFs taken from our train.csv
+            """
+
+            self.args = TrainingArguments(
+                output_dir                  = outDirectory,
+                num_train_epochs            = self.epochs,
+                per_device_train_batch_size = self.fineTuneTrainBatchSize,
+                per_device_eval_batch_size  = self.fineTuneEvalBatchSize,
+                learning_rate               = self.learningRate,
+                weight_decay                = self.weightDecay,
+                warmup_ratio                = self.warmupRatio,
+                eval_strategy               = "epoch",
+                save_strategy               = "epoch",
+                logging_steps               = 10,
+                load_best_model_at_end      = True,
+                metric_for_best_model       = "f1",
+            )
+
+            self.trainer = Trainer(
+                self.model,
+                self.args,
+                train_dataset               = self.dataset["train"],
+                eval_dataset                = self.dataset["validation"],
+                data_collator               = DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
+                compute_metrics             = self.metrics,
+            )
+
+            self.trainer.train()
+            self.trainer.save_model(outDirectory)
+            self.tokenizer.save_pretrained(outDirectory)
+            print(f"✓ Fine-tuned model saved to  {Path(outDirectory).resolve()}")
+
     def embeddings(
             self,
             sequences,
@@ -224,41 +263,6 @@ class DNABERT6:
                 idx += pooled.size(0)
 
         return vecs
-
-    def finetune(self, outDirectory="dnabert6_smorfs_ft", **override):
-            """
-            Fine-tune the dnabert 6 model, coding and non-coding
-            labeled smORFs taken from our train.csv
-            """
-
-            self.args = TrainingArguments(
-                output_dir                  = outDirectory,
-                num_train_epochs            = self.epochs,
-                per_device_train_batch_size = 8,
-                per_device_eval_batch_size  = 16,
-                learning_rate               = self.learningRate,
-                weight_decay                = self.weightDecay,
-                warmup_ratio                = self.warmupRatio,
-                eval_strategy               = "epoch",
-                save_strategy               = "epoch",
-                logging_steps               = 10,
-                load_best_model_at_end      = True,
-                metric_for_best_model       = "f1",
-            )
-
-            self.trainer = Trainer(
-                self.model,
-                self.args,
-                train_dataset               = self.dataset["train"],
-                eval_dataset                = self.dataset["validation"],
-                data_collator               = DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
-                compute_metrics             = self.metrics,
-            )
-
-            self.trainer.train()
-            self.trainer.save_model(outDirectory)
-            self.tokenizer.save_pretrained(outDirectory)
-            print(f"✓ Fine-tuned model saved to  {Path(outDirectory).resolve()}")
 
     def load(self, modelPath: str):
         """
@@ -317,7 +321,7 @@ class DNABERT6:
         
 model = DNABERT6()
 # model.load("dnabert6_smorfs_ft")
-# model.finetune()
+model.finetune()
 
 # pd.set_option("display.max_rows", None)    # show all rows
 # pd.set_option("display.max_columns", None) # show all columns
