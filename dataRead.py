@@ -13,9 +13,8 @@ def readFasta(path: str, label: int) -> None:
     Generator that yields (header, cleaned_seq) for every record in the FASTA.
     """
     for record in SeqIO.parse(path, "fasta"):
-        orfLen = firstORFLength(record.seq)
         cleaned = cleanup(record.seq)
-        toCsv(cleaned, label, orfLen)
+        toCsv(cleaned, label)
 
     
 
@@ -39,7 +38,7 @@ def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE) -> str:
 
     return seq
 
-def toCsv(sequence: str, label: int, orfLength: int, filepath: str = "train.csv") -> None:
+def toCsv(sequence: str, label: int, filepath: str = "train.csv") -> None:
 
     filepath = Path(filepath)
     exists = filepath.exists()
@@ -49,9 +48,9 @@ def toCsv(sequence: str, label: int, orfLength: int, filepath: str = "train.csv"
         writer = csv.writer(file)
 
         if not exists:
-            writer.writerow(["sequence", "label", "ORF length"])
+            writer.writerow(["sequence", "label"])
         
-        writer.writerow([sequence, label, orfLength])
+        writer.writerow([sequence, label])
 
 def main(codingFasta: str = "", nonCodingFasta: str = ""):
     
