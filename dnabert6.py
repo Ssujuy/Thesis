@@ -62,15 +62,16 @@ class DNABERT6:
         # Inititalize projection state, projection dimension and projection member variables
 
         self.projectionState = projectionState
-        self.projectionDimension = None
         self.linear = None
 
-        if self.projectionState == ProjectionState.NO_PROJECTION:
+        if self.hiddenState == tp.HiddenState.BOTH:
             self.projectionDimension = tp.DEFAULT_PROJECTION_DIMENSION
 
-        elif self.projectionState != ProjectionState.NO_PROJECTION and self.projectionDimension == None:
+        else:
+            self.projectionDimension = 2 * tp.DEFAULT_PROJECTION_DIMENSION
+
+        if self.projectionState != ProjectionState.NO_PROJECTION and projectionDimension == None:
             self.projectionState = ProjectionState.NO_PROJECTION
-            self.projectionDimension = tp.DEFAULT_PROJECTION_DIMENSION
 
         elif self.projectionState == ProjectionState.NOT_TRAINABLE:
             self.projectionDimension = projectionDimension
