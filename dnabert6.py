@@ -36,6 +36,7 @@ class DNABERT6:
                 warmupRatio: float                  = 0.1,
                 fineTuneEvalBatchSize               = 8,
                 fineTuneTrainBatchSize              = 8,
+                embeddingsBatchSize                 = 8,
                 device: str                         = "cpu",
                 projectionState: ProjectionState    = ProjectionState.NO_PROJECTION,
                 projectionDimension: int            = None,
@@ -106,6 +107,7 @@ class DNABERT6:
         self.warmupRatio = warmupRatio
         self.fineTuneTrainBatchSize = fineTuneTrainBatchSize
         self.fineTuneEvalBatchSize = fineTuneEvalBatchSize
+        self.embeddingsBatchSize = embeddingsBatchSize
 
         self.trainer = None
         self.arguments = None
@@ -226,9 +228,9 @@ class DNABERT6:
     def embeddings(
             self,
             sequences,
-            projectDim = 768,
-            batchSize = 32,
-            device = "cpu"
+            projectDim      = self.projectionDimension,
+            batchSize       = self.embeddingsBatchSize,
+            device          = self.device
             ):
         
         """
