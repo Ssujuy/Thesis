@@ -225,13 +225,7 @@ class DNABERT6:
             self.tokenizer.save_pretrained(outDirectory)
             print(f"✓ Fine-tuned model saved to  {Path(outDirectory).resolve()}")
 
-    def embeddings(
-            self,
-            sequences,
-            projectDim      = self.projectionDimension,
-            batchSize       = self.embeddingsBatchSize,
-            device          = self.device
-            ):
+    def embeddings(self, sequences):
         
         """
         Return an (N, D) NumPy matrix of embeddings. Default size
@@ -239,22 +233,22 @@ class DNABERT6:
         """
 
         self.model.eval()
-        self.model.to(device)
+        self.model.to(self.device)
 
-        vecs = np.empty((len(sequences), projectDim), dtype=np.float32)
+        vecs = np.empty((len(sequences), self.projectionDimension), dtype=np.float32)
         idx = 0
         with torch.no_grad():
 
-            for i in range(0, len(sequences), batchSize):
+            for i in range(0, len(sequences), self.embeddingsBatchSize):
 
-                batch = sequences[i : i + batchSize]
+                batch = sequences[i : i + self.embeddingsBatchSize]
                 toks  = self.tokenizer(
                     batch,
                     truncation=True,
                     padding="max_length",
                     max_length=self.windowSize,
                     return_tensors="pt"
-                ).to(device)
+                ).to(self.device)
 
                 attentionMask = toks["attention_mask"]
                                 
