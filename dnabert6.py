@@ -19,6 +19,8 @@ from Types import HiddenState, ProjectionState
 import Types as tp
 import torch.nn.functional as F
 
+from Helpers import loadDatasetPercentage
+
 ### The projection to fixed size needs to be tested with real data coding, non coding
 
 ### read fasta file for prediction. 
@@ -37,7 +39,7 @@ class DNABERT6:
                 fineTuneEvalBatchSize               = 8,
                 fineTuneTrainBatchSize              = 8,
                 embeddingsBatchSize                 = 8,
-                device: str                         = "cpu",
+                device: str                         = "cuda" if torch.cuda.is_available() else "cpu",
                 projectionState: ProjectionState    = ProjectionState.NO_PROJECTION,
                 projectionDimension: int            = None,
                 hiddenState: HiddenState            = HiddenState.CLS
@@ -94,12 +96,13 @@ class DNABERT6:
 
         self.trainingDatasetPercentage = trainDatasetPercentage
 
-        fullDataset = load_dataset("csv",data_files=trainingDataPath,split=f"train[:{self.trainingDatasetPercentage}%]")
-        split = fullDataset.train_test_split(test_size=0.20,shuffle=True,seed=42)
+        split = loadDatasetPercentage(trainingDataPath, trainDatasetPercentage)
 
         self.trainDataset = split["train"]
         self.validationDataset = split["test"]
-
+        from collections import Counter
+        print("train label counts:", Counter(self.trainDataset["label"]))
+        print("val   label counts:", Counter(self.validationDataset["label"]))
         self.windowSize = windowSize
         self.learningRate = learningRate
         self.epochs = epochs
@@ -177,7 +180,7 @@ class DNABERT6:
         acc  = accuracy_score(labels, preds)
         f1   = f1_score(labels, preds)
         prec, rec, _, _ = precision_recall_fscore_support(labels, preds, average="binary", zero_division=0)
-        ce_loss = log_loss(labels, torch.softmax(torch.tensor(logits), dim=-1))
+        ce_loss = log_loss(labels, torch.softmax(torch.tensor(logits), dim=-1),labels=[0, 1])
 
         return {
             "accuracy": acc,
@@ -195,6 +198,8 @@ class DNABERT6:
             Fine-tune the dnabert 6 model, coding and non-coding
             labeled smORFs taken from our train.csv
             """
+            print(self.trainDataset)
+            print(self.validationDataset)
 
             self.args = TrainingArguments(
                 output_dir                  = outDirectory,
@@ -318,7 +323,7 @@ class DNABERT6:
 
         print(self.model.config)
         
-model = DNABERT6(trainDatasetPercentage=1)
+model = DNABERT6(trainDatasetPercentage=5)
 # model.load("dnabert6_smorfs_ft")
 model.finetune()
 

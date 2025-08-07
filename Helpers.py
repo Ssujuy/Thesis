@@ -1,4 +1,5 @@
 import torch
+from datasets import load_dataset,DatasetDict, Dataset
 
 sequenceMapping = {
     "N": torch.tensor([0,0,0,0], dtype=torch.float32),
@@ -24,3 +25,18 @@ def sequenceTo1Hot(sequence: str)-> torch.Tensor:
         encoded[index] = sequenceMapping.get(nt)
         
     return encoded
+
+def loadDatasetPercentage(datasetPath: str, percentage: int)-> DatasetDict:
+    
+    fullDataset = load_dataset("csv",data_files=datasetPath,split="train")
+    fullDataset = fullDataset.shuffle(seed=42)
+    k = int(len(fullDataset) * percentage / 100)
+    fullDataset = fullDataset.select(range(k))
+
+    # ─── 80 / 20 stratified split (protects label balance) ───
+    split = fullDataset.train_test_split(
+        test_size=0.2,
+        seed=42,
+    )
+
+    return split

@@ -61,11 +61,11 @@ def main(codingFasta: str = "", nonCodingFasta: str = ""):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("codingFASTA", type=str,
+    parser.add_argument("--codingFastaPath", type=str, required=True,
                         help="Path to the input FASTA file for coding smORFs")
-    parser.add_argument("nonCodingFASTA", type=str,
+    parser.add_argument("--nonCodingFastaPath", type=str, required=True,
                         help="Path to the input FASTA file for non-coding smORFs")
     
     args = parser.parse_args()
     
-    main(codingFasta=args.codingFASTA, nonCodingFasta=args.nonCodingFASTA)
+    main(codingFasta=args.codingFastaPath, nonCodingFasta=args.nonCodingFastaPath)
