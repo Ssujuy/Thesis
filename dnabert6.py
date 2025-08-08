@@ -100,9 +100,7 @@ class DNABERT6:
 
         self.trainDataset = split["train"]
         self.validationDataset = split["test"]
-        from collections import Counter
-        print("train label counts:", Counter(self.trainDataset["label"]))
-        print("val   label counts:", Counter(self.validationDataset["label"]))
+
         self.windowSize = windowSize
         self.learningRate = learningRate
         self.epochs = epochs
@@ -198,8 +196,6 @@ class DNABERT6:
             Fine-tune the dnabert 6 model, coding and non-coding
             labeled smORFs taken from our train.csv
             """
-            print(self.trainDataset)
-            print(self.validationDataset)
 
             self.args = TrainingArguments(
                 output_dir                  = outDirectory,
@@ -325,6 +321,39 @@ class DNABERT6:
         
 model = DNABERT6(trainDatasetPercentage=5)
 # model.load("dnabert6_smorfs_ft")
+
+# # --- debug UNK rate (are we k-merizing or not?) ---
+# ids = model.tokenizer("ATG"*200, padding="max_length", max_length=512)["input_ids"]
+# unk = model.tokenizer.unk_token_id
+# print("UNK fraction (raw ATGx200):", sum(i == unk for i in ids) / len(ids))
+# # If this is big (~>0.5), you're feeding raw bases instead of 6-mers.
+
+seq = "ATGGCCGTGGGCCTCAACAAGGGCCACAAAGTGA"  # any short-ish example
+
+enc = model.tokenizer(
+    seq,
+    truncation=True,
+    padding="max_length",
+    max_length=64,                      # small for readability
+    return_special_tokens_mask=True,
+    return_tensors=None
+)
+
+ids    = enc["input_ids"]
+tokens = model.tokenizer.convert_ids_to_tokens(ids)
+
+# Show a compact view: first 25 tokens with [CLS]/[SEP] visible
+print(tokens[:25])
+
+# Drop special/pad tokens to inspect actual kmers
+plain = [t for t, m in zip(tokens, enc["special_tokens_mask"]) if m == 0]
+print("first kmers:", plain[:10])
+print("num kmers:", len(plain))
+
+vocab = model.tokenizer.get_vocab()
+print("Has ATGGCC?", "ATGGCC" in vocab)
+print(vocab)  # should be False for pure 6-mer vocab
+
 model.finetune()
 
 # pd.set_option("display.max_rows", None)    # show all rows

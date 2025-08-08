@@ -1,0 +1,5 @@
+1.Clean-up sequences from ambiguous characters, pad to 512 size, convert to upper case, save to csv and add label.
+
+python3 dataRead.py --codingFastaPath="data/coding_smORFs.fa" --nonCodingFastaPath="data/non_coding_smORFs.fa"
+
+2.
