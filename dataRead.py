@@ -3,10 +3,7 @@ import csv
 from Bio import SeqIO
 from pathlib import Path
 from computationalFeatures import firstORFLength
-
-DEFAULT_WINDOW_SIZE = 512          # fixed length 512 for DNABERT / CNN
-
-### are padding only on the right??
+import Types as tp
 
 def readFasta(path: str, label: int) -> None:
     """
@@ -18,10 +15,10 @@ def readFasta(path: str, label: int) -> None:
 
     
 
-def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE) -> str:
+def cleanup(seq: str, size: int = tp.DEFAULT_WINDOW_SIZE) -> str:
     """
     Return an upper-case, ambiguity-free DNA string of exactly pad_to length.
-    Truncates if longer, pads with 'N' tokens if shorter.
+    Truncates if longer.
     """
 
     seq = str(seq).upper()
@@ -30,11 +27,9 @@ def cleanup(seq: str, size: int = DEFAULT_WINDOW_SIZE) -> str:
     for amb in "NRYWSKMDHBV":
         seq = seq.replace(amb, "N")
 
-    # pad or truncate to fixed window size
+    # truncate to fixed window size
     if len(seq) > size:
         seq = seq[:size]
-    else:
-        seq = seq + "N" * (size - len(seq))
 
     return seq
 

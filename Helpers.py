@@ -1,5 +1,6 @@
 import torch
 from datasets import load_dataset,DatasetDict, Dataset
+import Types as tp
 
 sequenceMapping = {
     "N": torch.tensor([0,0,0,0], dtype=torch.float32),
@@ -8,6 +9,25 @@ sequenceMapping = {
     "G": torch.tensor([0,1,0,0], dtype=torch.float32),
     "T": torch.tensor([1,0,0,0], dtype=torch.float32)
 }
+
+def kmer(sequence: str, k: int, ambiguousState: tp.KmerAmbiguousState):
+
+    kmerSequence = []
+
+    for i in range(len(sequence) - k + 1):
+        
+        kmer = sequence[i:i+k]
+
+        if 'N' in kmer:
+
+            if ambiguousState == tp.KmerAmbiguousState.MASK:
+                kmerSequence.append('[MASK]')
+            else:
+                kmerSequence.append('[UNK]')
+        else:
+            kmerSequence.append(kmer)
+
+    return kmerSequence
 
 def sequenceTo1Hot(sequence: str)-> torch.Tensor:
     """

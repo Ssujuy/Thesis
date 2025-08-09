@@ -15,11 +15,10 @@ from sklearn.metrics import (
 import pandas as pd
 import numpy as np, torch
 from pathlib import Path
-from Types import HiddenState, ProjectionState
 import Types as tp
 import torch.nn.functional as F
 
-from Helpers import loadDatasetPercentage
+from Helpers import loadDatasetPercentage,kmer
 
 ### The projection to fixed size needs to be tested with real data coding, non coding
 
@@ -40,9 +39,9 @@ class DNABERT6:
                 fineTuneTrainBatchSize              = 8,
                 embeddingsBatchSize                 = 8,
                 device: str                         = "cuda" if torch.cuda.is_available() else "cpu",
-                projectionState: ProjectionState    = ProjectionState.NO_PROJECTION,
+                projectionState: tp.ProjectionState = tp.ProjectionState.NO_PROJECTION,
                 projectionDimension: int            = None,
-                hiddenState: HiddenState            = HiddenState.CLS
+                hiddenState: tp.HiddenState         = tp.HiddenState.CLS
             ):
 
         # tokenizer and model (with classification head)
@@ -73,11 +72,11 @@ class DNABERT6:
         else:
             self.projectionDimension = 2 * tp.DEFAULT_PROJECTION_DIMENSION
 
-        if self.projectionState != ProjectionState.NO_PROJECTION and projectionDimension == None:
-            self.projectionState = ProjectionState.NO_PROJECTION
+        if self.projectionState != tp.ProjectionState.NO_PROJECTION and projectionDimension == None:
+            self.projectionState = tp.ProjectionState.NO_PROJECTION
 
-        elif self.projectionState == ProjectionState.NOT_TRAINABLE:
-            self.projectionDimension = projectionDimension
+        elif self.projectionState == tp.ProjectionState.NOT_TRAINABLE:
+            self.projectionDimension = tp.projectionDimension
 
             # frozen projection (built each call, no grad)
             self.linear = torch.nn.Linear(tp.DEFAULT_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
@@ -85,7 +84,7 @@ class DNABERT6:
             for p in self.linear.parameters():
                 p.requires_grad = False
 
-        elif self.projectionState == ProjectionState.TRAINABLE:
+        elif self.projectionState == tp.ProjectionState.TRAINABLE:
             self.projectionDimension = projectionDimension
 
             #trainable projection
@@ -122,7 +121,7 @@ class DNABERT6:
         self.trainDataset.set_format(type="torch")
         self.validationDataset.set_format(type="torch")
 
-    def _poolHidden(self, hidden, attentionMask, state: HiddenState):
+    def _poolHidden(self, hidden, attentionMask, state: tp.HiddenState):
         """
         hidden : (B, L, 768) - last_hidden_state from DNABERT
         
@@ -137,11 +136,11 @@ class DNABERT6:
         (B, 1536)
         """
 
-        if state == HiddenState.CLS:
+        if state == tp.HiddenState.CLS:
 
             return hidden[:, 0, :]
         
-        elif state == HiddenState.MEAN:
+        elif state == tp.HiddenState.MEAN:
 
             # mask : (B, L, 1) → 1 for real tokens, 0 for padding
             mask = attentionMask.unsqueeze(-1)
@@ -155,11 +154,11 @@ class DNABERT6:
 
             return mean
 
-        elif state == HiddenState.BOTH:
+        elif state == tp.HiddenState.BOTH:
 
             # Re-use the two branches above
-            cls_vec  = self._poolHidden(hidden, attentionMask, HiddenState.CLS)
-            mean_vec = self._poolHidden(hidden, attentionMask, HiddenState.MEAN)
+            cls_vec  = self._poolHidden(hidden, attentionMask, tp.HiddenState.CLS)
+            mean_vec = self._poolHidden(hidden, attentionMask, tp.HiddenState.MEAN)
 
             combined = torch.cat([cls_vec, mean_vec], dim=-1)  # (B, 1536)
             return combined
@@ -189,7 +188,18 @@ class DNABERT6:
         } 
 
     def encode(self, batch):
-        return self.tokenizer(batch["sequence"], truncation=True, padding="max_length", max_length=self.windowSize)
+        """
+        Convert batched string to sequences to kmers and return tokenizer
+        """
+        batchKmers = [kmer(seq, 6, tp.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
+
+        return self.tokenizer(
+            batchKmers,
+            is_split_into_words=True,
+            truncation=True,
+            padding="max_length",
+            max_length=self.windowSize
+        )
 
     def finetune(self, outDirectory="dnabert6_smorfs_ft", **override):
             """
@@ -238,16 +248,21 @@ class DNABERT6:
 
         vecs = np.empty((len(sequences), self.projectionDimension), dtype=np.float32)
         idx = 0
+
         with torch.no_grad():
 
             for i in range(0, len(sequences), self.embeddingsBatchSize):
 
                 batch = sequences[i : i + self.embeddingsBatchSize]
+                batchedKmers = [kmer(seq, 6, tp.KmerAmbiguousState.MASK) for seq in batch]
+
                 toks  = self.tokenizer(
-                    batch,
+                    batchedKmers,
+                    is_split_into_words=True,
                     truncation=True,
                     padding="max_length",
                     max_length=self.windowSize,
+                    return_special_tokens_mask=True,
                     return_tensors="pt"
                 ).to(self.device)
 
@@ -321,38 +336,6 @@ class DNABERT6:
         
 model = DNABERT6(trainDatasetPercentage=5)
 # model.load("dnabert6_smorfs_ft")
-
-# # --- debug UNK rate (are we k-merizing or not?) ---
-# ids = model.tokenizer("ATG"*200, padding="max_length", max_length=512)["input_ids"]
-# unk = model.tokenizer.unk_token_id
-# print("UNK fraction (raw ATGx200):", sum(i == unk for i in ids) / len(ids))
-# # If this is big (~>0.5), you're feeding raw bases instead of 6-mers.
-
-seq = "ATGGCCGTGGGCCTCAACAAGGGCCACAAAGTGA"  # any short-ish example
-
-enc = model.tokenizer(
-    seq,
-    truncation=True,
-    padding="max_length",
-    max_length=64,                      # small for readability
-    return_special_tokens_mask=True,
-    return_tensors=None
-)
-
-ids    = enc["input_ids"]
-tokens = model.tokenizer.convert_ids_to_tokens(ids)
-
-# Show a compact view: first 25 tokens with [CLS]/[SEP] visible
-print(tokens[:25])
-
-# Drop special/pad tokens to inspect actual kmers
-plain = [t for t, m in zip(tokens, enc["special_tokens_mask"]) if m == 0]
-print("first kmers:", plain[:10])
-print("num kmers:", len(plain))
-
-vocab = model.tokenizer.get_vocab()
-print("Has ATGGCC?", "ATGGCC" in vocab)
-print(vocab)  # should be False for pure 6-mer vocab
 
 model.finetune()
 
