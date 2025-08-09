@@ -166,18 +166,46 @@ class DNABERT6:
         else:
             raise ValueError("state must be CLS, MEAN or BOTH")
 
-    def metrics(self, eval_pred):
+    def metrics(self, evalPred):
         """
         Function given to Trainer to evaluate metrics: 
         accuracy, f1_score, loss, precision.
         """
-        logits, labels = eval_pred
+        # evalPred is usually an EvalPrediction from HF Trainer.
+        # In some configs .predictions can be a tuple (e.g., (loss, logits)),
+        # so we grab logits in a tuple-safe way.
+
+        logits = (
+            evalPred.predictions[0]
+            if isinstance(evalPred.predictions, tuple)
+            else evalPred.predictions
+        )
+
+        labels = evalPred.label_ids # ground-truth class ids (shape [N])
+
+        logits = np.asarray(logits, dtype=np.float64)
+        labels = np.asarray(labels)
+
+        # ── Stable softmax to turn logits into probabilities ──
+        # Subtract row-wise max to avoid overflow in exp().
+
+        logits -= logits.max(axis=1, keepdims=True)
+        exp_logits = np.exp(logits)
+        probs = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+
+        # Class predictions = argmax over probabilities.
+
+        preds = probs.argmax(axis=1)
         preds  = np.argmax(logits, axis=-1)
 
         acc  = accuracy_score(labels, preds)
         f1   = f1_score(labels, preds)
         prec, rec, _, _ = precision_recall_fscore_support(labels, preds, average="binary", zero_division=0)
-        ce_loss = log_loss(labels, torch.softmax(torch.tensor(logits), dim=-1),labels=[0, 1])
+
+        # Cross-entropy (log loss) expects PROBABILITIES, not logits.
+        # labels=[0,1] fixes the class order even if one class is absent in a batch.
+
+        ce_loss = log_loss(labels, probs,labels=[0, 1])
 
         return {
             "accuracy": acc,
@@ -220,6 +248,7 @@ class DNABERT6:
                 logging_steps               = 10,
                 load_best_model_at_end      = True,
                 metric_for_best_model       = "f1",
+                max_grad_norm               = 1.0,
             )
 
             self.trainer = Trainer(
