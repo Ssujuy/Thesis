@@ -1,3 +1,9 @@
+import pandas as pd
+import numpy as np, torch
+from pathlib import Path
+import Types, Helpers
+from datasets import load_dataset
+import torch.nn.functional as F
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -5,20 +11,12 @@ from transformers import (
     Trainer,
     DataCollatorWithPadding
 )
-from datasets import load_dataset
 from sklearn.metrics import (
     f1_score,
     accuracy_score,
     log_loss,
     precision_recall_fscore_support,
 )
-import pandas as pd
-import numpy as np, torch
-from pathlib import Path
-import Types as tp
-import torch.nn.functional as F
-
-from Helpers import loadDatasetPercentage,kmer
 
 ### The projection to fixed size needs to be tested with real data coding, non coding
 
@@ -27,21 +25,21 @@ class DNABERT6:
 
     def __init__(
                 self,
-                modelID: str                        = "zhihan1996/DNA_bert_6",
-                trainingDataPath: str               = "train.csv",
-                trainDatasetPercentage              = 100,
-                epochs: int                         = 4,
-                learningRate: float                 = 2e-5,
-                windowSize: int                     = 512,
-                weightDecay: float                  = 0.01,
-                warmupRatio: float                  = 0.1,
-                fineTuneEvalBatchSize               = 8,
-                fineTuneTrainBatchSize              = 8,
-                embeddingsBatchSize                 = 8,
-                device: str                         = "cuda" if torch.cuda.is_available() else "cpu",
-                projectionState: tp.ProjectionState = tp.ProjectionState.NO_PROJECTION,
-                projectionDimension: int            = None,
-                hiddenState: tp.HiddenState         = tp.HiddenState.CLS
+                modelID: str                            = Types.DEFAULT_DNABERT6_MODEL_ID,
+                trainingDataPath: str                   = "train.csv",
+                trainDatasetPercentage                  = 100,
+                epochs: int                             = Types.DEFAULT_DNABERT6_EPOCHS,
+                learningRate: float                     = Types.DEFAULT_DNABERT6_LEARNING_RATE,
+                windowSize: int                         = Types.DEFAULT_DNABERT6_WINDOW_SIZE,
+                weightDecay: float                      = Types.DEFAULT_DNABERT6_WEIGHT_DECAY,
+                warmupRatio: float                      = Types.DEFAULT_DNABERT6_WARMUP_RATIO,
+                fineTuneEvalBatchSize                   = Types.DEFAULT_DNABERT6_BATCH_SIZE,
+                fineTuneTrainBatchSize                  = Types.DEFAULT_DNABERT6_BATCH_SIZE,
+                embeddingsBatchSize                     = Types.DEFAULT_DNABERT6_BATCH_SIZE,
+                device: str                             = Types.DEFAULT_DNABERT6_DEVICE,
+                projectionState: Types.ProjectionState  = Types.ProjectionState.NO_PROJECTION,
+                projectionDimension: int                = None,
+                hiddenState: Types.HiddenState          = Types.HiddenState.CLS
             ):
 
         # tokenizer and model (with classification head)
@@ -66,36 +64,36 @@ class DNABERT6:
         self.projectionState = projectionState
         self.linear = None
 
-        if self.hiddenState == tp.HiddenState.BOTH:
-            self.projectionDimension = tp.DEFAULT_PROJECTION_DIMENSION
+        if self.hiddenState == Types.HiddenState.BOTH:
+            self.projectionDimension = 2 * Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION
 
         else:
-            self.projectionDimension = 2 * tp.DEFAULT_PROJECTION_DIMENSION
+            self.projectionDimension = Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION
 
-        if self.projectionState != tp.ProjectionState.NO_PROJECTION and projectionDimension == None:
-            self.projectionState = tp.ProjectionState.NO_PROJECTION
+        if self.projectionState != Types.ProjectionState.NO_PROJECTION and projectionDimension == None:
+            self.projectionState = Types.ProjectionState.NO_PROJECTION
 
-        elif self.projectionState == tp.ProjectionState.NOT_TRAINABLE:
-            self.projectionDimension = tp.projectionDimension
+        elif self.projectionState == Types.ProjectionState.NOT_TRAINABLE:
+            self.projectionDimension = Types.projectionDimension
 
             # frozen projection (built each call, no grad)
-            self.linear = torch.nn.Linear(tp.DEFAULT_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
+            self.linear = torch.nn.Linear(Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
             torch.nn.init.xavier_uniform_(self.linear.weight)
             for p in self.linear.parameters():
                 p.requires_grad = False
 
-        elif self.projectionState == tp.ProjectionState.TRAINABLE:
+        elif self.projectionState == Types.ProjectionState.TRAINABLE:
             self.projectionDimension = projectionDimension
 
             #trainable projection
-            self.linear = torch.nn.Linear(tp.DEFAULT_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
+            self.linear = torch.nn.Linear(Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
             torch.nn.init.xavier_uniform_(self.linear.weight)
 
         #initialize dataset from our previously created csv file
 
         self.trainingDatasetPercentage = trainDatasetPercentage
 
-        split = loadDatasetPercentage(trainingDataPath, trainDatasetPercentage)
+        split = Helpers.loadDatasetPercentage(trainingDataPath, trainDatasetPercentage)
 
         self.trainDataset = split["train"]
         self.validationDataset = split["test"]
@@ -121,7 +119,7 @@ class DNABERT6:
         self.trainDataset.set_format(type="torch")
         self.validationDataset.set_format(type="torch")
 
-    def _poolHidden(self, hidden, attentionMask, state: tp.HiddenState):
+    def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState):
         """
         hidden : (B, L, 768) - last_hidden_state from DNABERT
         
@@ -136,11 +134,11 @@ class DNABERT6:
         (B, 1536)
         """
 
-        if state == tp.HiddenState.CLS:
+        if state == Types.HiddenState.CLS:
 
             return hidden[:, 0, :]
         
-        elif state == tp.HiddenState.MEAN:
+        elif state == Types.HiddenState.MEAN:
 
             # mask : (B, L, 1) → 1 for real tokens, 0 for padding
             mask = attentionMask.unsqueeze(-1)
@@ -154,11 +152,11 @@ class DNABERT6:
 
             return mean
 
-        elif state == tp.HiddenState.BOTH:
+        elif state == Types.HiddenState.BOTH:
 
             # Re-use the two branches above
-            cls_vec  = self._poolHidden(hidden, attentionMask, tp.HiddenState.CLS)
-            mean_vec = self._poolHidden(hidden, attentionMask, tp.HiddenState.MEAN)
+            cls_vec  = self._poolHidden(hidden, attentionMask, Types.HiddenState.CLS)
+            mean_vec = self._poolHidden(hidden, attentionMask, Types.HiddenState.MEAN)
 
             combined = torch.cat([cls_vec, mean_vec], dim=-1)  # (B, 1536)
             return combined
@@ -196,7 +194,6 @@ class DNABERT6:
         # Class predictions = argmax over probabilities.
 
         preds = probs.argmax(axis=1)
-        preds  = np.argmax(logits, axis=-1)
 
         acc  = accuracy_score(labels, preds)
         f1   = f1_score(labels, preds)
@@ -219,7 +216,7 @@ class DNABERT6:
         """
         Convert batched string to sequences to kmers and return tokenizer
         """
-        batchKmers = [kmer(seq, 6, tp.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
+        batchKmers = [Helpers.kmer(seq, 6, Types.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
 
         return self.tokenizer(
             batchKmers,
@@ -245,9 +242,10 @@ class DNABERT6:
                 warmup_ratio                = self.warmupRatio,
                 eval_strategy               = "epoch",
                 save_strategy               = "epoch",
-                logging_steps               = 10,
+                logging_strategy            = "epoch",
                 load_best_model_at_end      = True,
                 metric_for_best_model       = "f1",
+                greater_is_better           = True,
                 max_grad_norm               = 1.0,
             )
 
@@ -256,7 +254,6 @@ class DNABERT6:
                 self.args,
                 train_dataset               = self.trainDataset,
                 eval_dataset                = self.validationDataset,
-                data_collator               = DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
                 compute_metrics             = self.metrics,
             )
 
@@ -283,7 +280,7 @@ class DNABERT6:
             for i in range(0, len(sequences), self.embeddingsBatchSize):
 
                 batch = sequences[i : i + self.embeddingsBatchSize]
-                batchedKmers = [kmer(seq, 6, tp.KmerAmbiguousState.MASK) for seq in batch]
+                batchedKmers = [Helpers.kmer(seq, 6, Types.KmerAmbiguousState.MASK) for seq in batch]
 
                 toks  = self.tokenizer(
                     batchedKmers,
@@ -328,7 +325,7 @@ class DNABERT6:
 
         argsPath = path/"training_args.bin"
         if argsPath.exists():
-            self.args = torch.load(argsPath, weights_only=False)
+            self.args = torch.load(argsPath, map_location="cpu")
 
             # pull the key hyper-params back into the object
 
@@ -338,7 +335,7 @@ class DNABERT6:
             self.warmupRatio = float(self.args.warmup_ratio)
 
         else:
-            self.args = None   # if you saved only the model weights
+            self.args = None
 
         print("✓ Loaded everything from", path.resolve())
 
@@ -362,16 +359,3 @@ class DNABERT6:
     def configuration(self) -> None:
 
         print(self.model.config)
-        
-model = DNABERT6(trainDatasetPercentage=5)
-# model.load("dnabert6_smorfs_ft")
-
-model.finetune()
-
-# pd.set_option("display.max_rows", None)    # show all rows
-# pd.set_option("display.max_columns", None) # show all columns
-# seq = "ATGGAAACGTTACTGACCTGAGGTCGTTGACCATGGTGAACTGCAGTACGGTACCGTCCGATGTTGACTACGGCTACGTAGTGAACC"        # 90 bp total
-
-# emb = model.embeddings([seq])          # shape (1, 768)
-# print(emb.shape)
-# print(emb)                     # first 10 dims for sanity

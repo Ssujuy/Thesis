@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 15 Aug 2025
+
+1. Minor code fixes in dnabert6 file, removed test code.
+2. Added more default for dnabert6 into Types.
+
 ## 9 Aug 2025
 
 1. Changed metrics function in DNABERT6, in order to:
