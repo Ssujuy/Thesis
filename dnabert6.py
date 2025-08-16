@@ -2,14 +2,12 @@ import pandas as pd
 import numpy as np, torch
 from pathlib import Path
 import Types, Helpers
-from datasets import load_dataset
 import torch.nn.functional as F
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     TrainingArguments,
-    Trainer,
-    DataCollatorWithPadding
+    Trainer
 )
 from sklearn.metrics import (
     f1_score,
@@ -39,7 +37,8 @@ class DNABERT6:
                 device: str                             = Types.DEFAULT_DNABERT6_DEVICE,
                 projectionState: Types.ProjectionState  = Types.ProjectionState.NO_PROJECTION,
                 projectionDimension: int                = None,
-                hiddenState: Types.HiddenState          = Types.HiddenState.CLS
+                hiddenState: Types.HiddenState          = Types.HiddenState.CLS,
+                saveDir : str                           = Types.DEFAULT_DNABER6_SAVE_DIRECTORY
             ):
 
         # tokenizer and model (with classification head)
@@ -89,15 +88,10 @@ class DNABERT6:
             self.linear = torch.nn.Linear(Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
             torch.nn.init.xavier_uniform_(self.linear.weight)
 
-        #initialize dataset from our previously created csv file
-
         self.trainingDatasetPercentage = trainDatasetPercentage
-
-        split = Helpers.loadDatasetPercentage(trainingDataPath, trainDatasetPercentage)
-
-        self.trainDataset = split["train"]
-        self.validationDataset = split["test"]
-
+        self.trainingDataPath = trainingDataPath
+        self.trainDataset = None
+        self.validationDataset = None
         self.windowSize = windowSize
         self.learningRate = learningRate
         self.epochs = epochs
@@ -106,9 +100,33 @@ class DNABERT6:
         self.fineTuneTrainBatchSize = fineTuneTrainBatchSize
         self.fineTuneEvalBatchSize = fineTuneEvalBatchSize
         self.embeddingsBatchSize = embeddingsBatchSize
+        self.saveDirectory = saveDir
 
         self.trainer = None
         self.arguments = None
+
+        print("Initialized DNABERT-6 model for finetuning")
+        print(f"Dataset path for finetuning: {self.trainingDataPath}")
+        print(f"Dataset percentage to use: {self.trainingDatasetPercentage}%")
+        print(f"Learning rate: {self.learningRate}")
+        print(f"Window size: {self.windowSize}")
+        print(f"Weight decay: {self.weightDecay}")
+        print(f"Warmup ratio: {self.warmupRatio}")
+        print(f"Finetuning eval barch size: {self.fineTuneEvalBatchSize}")
+        print(f"Finetuning train batch size: {self.fineTuneTrainBatchSize}")
+        print(f"Embeddings batch size: {self.embeddingsBatchSize}")
+        print(f"Projection state: {self.projectionState}")
+        print(f"Projection dimension: {self.projectionDimension}")
+        print(f"Hidden state: {self.hiddenState}")
+        print(f"Directory to save the finetuned model: {self.saveDirectory}")
+
+    def datasetInit(self):
+        #initialize dataset from our previously created csv file
+
+        split = Helpers.loadDatasetPercentage(self.trainingDataPath, self.trainingDatasetPercentage)
+
+        self.trainDataset = split["train"]
+        self.validationDataset = split["test"]
 
         # tokenise every row with DNABERT's tokenizer
 
@@ -118,6 +136,9 @@ class DNABERT6:
         # create PyTorch tensors
         self.trainDataset.set_format(type="torch")
         self.validationDataset.set_format(type="torch")
+
+        print(f"Initialized Training Dataset")
+        print(f"Initialized Validation Dataset")
 
     def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState):
         """
@@ -226,14 +247,14 @@ class DNABERT6:
             max_length=self.windowSize
         )
 
-    def finetune(self, outDirectory="dnabert6_smorfs_ft", **override):
+    def finetune(self, **override):
             """
             Fine-tune the dnabert 6 model, coding and non-coding
             labeled smORFs taken from our train.csv
             """
 
             self.args = TrainingArguments(
-                output_dir                  = outDirectory,
+                output_dir                  = self.saveDirectory,
                 num_train_epochs            = self.epochs,
                 per_device_train_batch_size = self.fineTuneTrainBatchSize,
                 per_device_eval_batch_size  = self.fineTuneEvalBatchSize,
@@ -258,9 +279,9 @@ class DNABERT6:
             )
 
             self.trainer.train()
-            self.trainer.save_model(outDirectory)
-            self.tokenizer.save_pretrained(outDirectory)
-            print(f"✓ Fine-tuned model saved to  {Path(outDirectory).resolve()}")
+            self.trainer.save_model(self.saveDirectory)
+            self.tokenizer.save_pretrained(self.saveDirectory)
+            print(f"✓ Fine-tuned model saved to  {Path(self.saveDirectory).resolve()}")
 
     def embeddings(self, sequences):
         
@@ -325,7 +346,7 @@ class DNABERT6:
 
         argsPath = path/"training_args.bin"
         if argsPath.exists():
-            self.args = torch.load(argsPath, map_location="cpu")
+            self.args = torch.load(argsPath, weights_only=False)
 
             # pull the key hyper-params back into the object
 

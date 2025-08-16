@@ -2,4 +2,32 @@
 
 python3 dataRead.py --codingFastaPath="data/coding_smORFs.fa" --nonCodingFastaPath="data/non_coding_smORFs.fa"
 
-2.
+2.Run featureExtract script to either finetune the DNABERT-6 model or load a finetuned model for embeddings extraction, also compute other features.
+
+    (a) finetune dnabert6 model with any possible args.
+    
+        python featureExtract.py finetune \
+        --datasetPath train.csv \
+        --datasetPercentage 100 \
+        --epochs 4 \
+        --learningRate 2e-5 \
+        --windowSize 512 \
+        --weightDecay 0.01 \
+        --warmupRatio 0.1 \
+        --finetuneTrainBatchSize 16 \
+        --finetuneEvalBatchSize 16 \
+        --embeddingsBatchSize 16 \
+        --hiddenState cls \
+        --projectionDimension None \
+        --projectionState 0 \
+        --saveDirectory dnabert6_smorfs_ft
+    
+    (b) Load finetuned dnabert6 model, extract embeddings and compute other features from a sequences csv.
+
+        python featureExtract.py features \
+        --modelDirectory dnabert6_smorfs_ft \
+        --sequencesPath sequences.fasta \
+        --saveFeaturesPath emb.npy \
+        --hiddenState cls \
+        --projectionDimension None \
+        --projectionState 0
