@@ -24,8 +24,8 @@ class DNABERT6:
     def __init__(
                 self,
                 modelID: str                            = Types.DEFAULT_DNABERT6_MODEL_ID,
-                trainingDataPath: str                   = "train.csv",
-                trainDatasetPercentage                  = 100,
+                trainingDataPath: str                   = Types.DEFAULT_DNABER6_DATASET_PATH,
+                trainDatasetPercentage                  = Types.DEFAULT_DNABER6_DATASET_PERCENTAGE,
                 epochs: int                             = Types.DEFAULT_DNABERT6_EPOCHS,
                 learningRate: float                     = Types.DEFAULT_DNABERT6_LEARNING_RATE,
                 windowSize: int                         = Types.DEFAULT_DNABERT6_WINDOW_SIZE,
@@ -120,7 +120,7 @@ class DNABERT6:
         print(f"Hidden state: {self.hiddenState}")
         print(f"Directory to save the finetuned model: {self.saveDirectory}")
 
-    def datasetInit(self):
+    def datasetInit(self) -> None:
         #initialize dataset from our previously created csv file
 
         split = Helpers.loadDatasetPercentage(self.trainingDataPath, self.trainingDatasetPercentage)
@@ -137,8 +137,8 @@ class DNABERT6:
         self.trainDataset.set_format(type="torch")
         self.validationDataset.set_format(type="torch")
 
-        print(f"Initialized Training Dataset")
-        print(f"Initialized Validation Dataset")
+        print(f"Initialized Training Dataset: {self.trainDataset.shape}")
+        print(f"Initialized Validation Dataset: {self.validationDataset.shape}")
 
     def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState):
         """
@@ -185,7 +185,7 @@ class DNABERT6:
         else:
             raise ValueError("state must be CLS, MEAN or BOTH")
 
-    def metrics(self, evalPred):
+    def metrics(self, evalPred) -> dict:
         """
         Function given to Trainer to evaluate metrics: 
         accuracy, f1_score, loss, precision.
@@ -247,7 +247,7 @@ class DNABERT6:
             max_length=self.windowSize
         )
 
-    def finetune(self, **override):
+    def finetune(self, **override) -> None:
             """
             Fine-tune the dnabert 6 model, coding and non-coding
             labeled smORFs taken from our train.csv
@@ -309,7 +309,6 @@ class DNABERT6:
                     truncation=True,
                     padding="max_length",
                     max_length=self.windowSize,
-                    return_special_tokens_mask=True,
                     return_tensors="pt"
                 ).to(self.device)
 
@@ -326,7 +325,7 @@ class DNABERT6:
 
         return vecs
 
-    def load(self, modelPath: str):
+    def load(self, modelPath: str) -> None:
         """
         Fully restore a fine-tuned checkpoint:
 
