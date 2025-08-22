@@ -20,7 +20,8 @@ DEFAULT_DNABER6_METRIC                  = "f1"
 ### end
 
 ###
-
+DEFAULT_PT_ROWS_PRINT                   = 6
+DEFAULT_PT_LENGTH_PRINT                 = 10
 ### end
 
 class KmerAmbiguousState(Enum):

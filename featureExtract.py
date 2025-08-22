@@ -51,7 +51,12 @@ def featureExtraction(
     hiddenState: Types.HiddenState,
 ):
     
-    model = dnabert6.DNABERT6(projectionState=projectionState, projectionDimension=projectionDimension, hiddenState=hiddenState)
+    model = dnabert6.DNABERT6(
+        projectionState=projectionState,
+        projectionDimension=projectionDimension,
+        hiddenState=hiddenState
+    )
+
     model.load(modelDirectory)
 
     labels, sequences = [], []
@@ -108,7 +113,11 @@ def featureExtraction(
 
     printPt(saveFeaturesPath)
 
-def printPt(saveFeaturesPath: str, rows:int =6, dim: int =10):
+def printPt(
+        saveFeaturesPath: str,
+        rows:int =Types.DEFAULT_PT_ROWS_PRINT,
+        dim: int =Types.DEFAULT_PT_LENGTH_PRINT
+    ):
 
     saveFeaturesPath = Path(saveFeaturesPath)
     ptFile = torch.load(saveFeaturesPath, map_location="cpu")
