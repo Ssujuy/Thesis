@@ -1,5 +1,8 @@
-import argparse, dnabert6, Types, Helpers
-
+import argparse, dnabert6, csv
+import Types, Helpers
+import pandas as pd
+from pathlib import Path
+import torch
 
 def finetune(
     datasetPath: str,
@@ -51,7 +54,78 @@ def featureExtraction(
     model = dnabert6.DNABERT6(projectionState=projectionState, projectionDimension=projectionDimension, hiddenState=hiddenState)
     model.load(modelDirectory)
 
-    sequence = ""
+    labels, sequences = [], []
+    onehot = []
+    embeddings = None
+
+    with open(sequencesPath, mode="r", newline="", encoding="utf-8") as sequencesFile:
+    
+        reader = csv.reader(sequencesFile)
+        next(reader)
+
+        for row in reader:
+            sequences.append(row[0])
+            labels.append(row[1])
+            onehot.append(Helpers.sequenceTo1Hot(row[0]))
+
+    embeddings = model.embeddings(sequences)
+
+    # Stack one-hots -> (N, 512, 4)
+    onehotTensor = torch.stack(onehot).contiguous().to(torch.float32)
+
+    # Embeddings -> (N, D)  (model.embeddings returns np.ndarray)
+    embedTensor = torch.from_numpy(embeddings).contiguous().to(torch.float32)
+
+    # Labels -> (N,)
+    labelTensor = torch.tensor([int(x) for x in labels], dtype=torch.long)
+
+    # Optional metadata (handy for debugging/repro)
+    meta = {
+        "model_dir": str(Path(modelDirectory).resolve()),
+        "hidden_state": getattr(hiddenState, "name", str(hiddenState)),
+        "projection_state": getattr(projectionState, "name", str(projectionState)),
+        "projection_dim": int(projectionDimension) if projectionDimension is not None else None,
+        "window_size": model.windowSize,
+        "embedding_dim": int(embedTensor.shape[1]),
+        "num_samples": len(sequences),
+    }
+
+    # Save everything in one .pt file
+    payload = {
+        "sequences": sequences,
+        "onehot": onehotTensor,
+        "embeddings": embedTensor,
+        "labels": labelTensor,
+        "meta": meta,
+    }
+    saveFeaturesPath = Path(saveFeaturesPath)
+    torch.save(payload, saveFeaturesPath)
+
+    print(f"✓ Saved {len(sequences)} samples to {saveFeaturesPath.resolve()}")
+    print(f"   onehot:      {tuple(onehotTensor.shape)}")
+    print(f"   embeddings:  {tuple(embedTensor.shape)}")
+    print(f"   labels:      {tuple(labelTensor.shape)}")
+
+    printPt(saveFeaturesPath)
+
+def printPt(saveFeaturesPath: str, rows:int =6, dim: int =10):
+
+    saveFeaturesPath = Path(saveFeaturesPath)
+    ptFile = torch.load(saveFeaturesPath, map_location="cpu")
+
+    print(f"Printing first {rows} rows of {saveFeaturesPath.resolve()} for sanity check.")
+
+    oh = ptFile["onehot"][:rows, :dim, :].to(torch.int8).cpu().tolist()
+    emb = ptFile["embeddings"][:rows, :dim].cpu().numpy().tolist()
+
+    df = pd.DataFrame({
+        "sequence": ptFile["sequences"][:rows],
+        "label": ptFile["labels"][:rows].tolist(),
+        "onehot": oh,
+        "embeddings": emb
+    })
+
+    print(df)
 
 if __name__ == "__main__":
 

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 22 Aug 2025
+
+1. Added python script featureExtract.py where:
+    - Mode finetune creates a dnaber6 model and finetunes it with dataset given.
+    - Mode features loads a dnabert6 model from the given path and extracts embeddings from the model, computes other features and converts sequences to 1hot encoded.
+      Then saves the results in a pt file. With keys: ["sequences", "labels", "onehot", "embeddings"].
+2. Added more Default values for DNABERT6 model
+3. Fixed command for featureExtract features mode to be more realistic.
+
 ## 15 Aug 2025
 
 1. Minor code fixes in dnabert6 file, removed test code.

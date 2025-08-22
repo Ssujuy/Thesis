@@ -1,6 +1,6 @@
 import torch
 from datasets import load_dataset,DatasetDict, Dataset
-import Types as tp
+import Types
 
 sequenceMapping = {
     "N": torch.tensor([0,0,0,0], dtype=torch.float32),
@@ -10,7 +10,7 @@ sequenceMapping = {
     "T": torch.tensor([1,0,0,0], dtype=torch.float32)
 }
 
-def kmer(sequence: str, k: int, ambiguousState: tp.KmerAmbiguousState):
+def kmer(sequence: str, k: int, ambiguousState: Types.KmerAmbiguousState):
 
     kmerSequence = []
 
@@ -20,7 +20,7 @@ def kmer(sequence: str, k: int, ambiguousState: tp.KmerAmbiguousState):
 
         if 'N' in kmer:
 
-            if ambiguousState == tp.KmerAmbiguousState.MASK:
+            if ambiguousState == Types.KmerAmbiguousState.MASK:
                 kmerSequence.append('[MASK]')
             else:
                 kmerSequence.append('[UNK]')
@@ -34,8 +34,7 @@ def sequenceTo1Hot(sequence: str)-> torch.Tensor:
     Helper function to create 1-hot encoded tensor
     from a DNA sequence input
     """
-    L = len(sequence)
-    encoded = torch.zeros(L,4)
+    encoded = torch.zeros(Types.DEFAULT_DNABERT6_WINDOW_SIZE,4)
     
     for index, nt in enumerate(sequence):
         

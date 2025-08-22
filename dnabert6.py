@@ -38,6 +38,8 @@ class DNABERT6:
                 projectionState: Types.ProjectionState  = Types.ProjectionState.NO_PROJECTION,
                 projectionDimension: int                = None,
                 hiddenState: Types.HiddenState          = Types.HiddenState.CLS,
+                strategy: str                           = Types.DEFAULT_DNABERT6_STRATEGY,
+                metric: str                             = Types.DEFAULT_DNABER6_METRIC,
                 saveDir : str                           = Types.DEFAULT_DNABER6_SAVE_DIRECTORY
             ):
 
@@ -100,6 +102,8 @@ class DNABERT6:
         self.fineTuneTrainBatchSize = fineTuneTrainBatchSize
         self.fineTuneEvalBatchSize = fineTuneEvalBatchSize
         self.embeddingsBatchSize = embeddingsBatchSize
+        self.strategy = strategy
+        self.metric = metric
         self.saveDirectory = saveDir
 
         self.trainer = None
@@ -118,6 +122,8 @@ class DNABERT6:
         print(f"Projection state: {self.projectionState}")
         print(f"Projection dimension: {self.projectionDimension}")
         print(f"Hidden state: {self.hiddenState}")
+        print(f"Evaluation, logging and save stratefy: {self.strategy}")
+        print(f"Metric for best model: {self.metric}")
         print(f"Directory to save the finetuned model: {self.saveDirectory}")
 
     def datasetInit(self) -> None:
@@ -237,7 +243,7 @@ class DNABERT6:
         """
         Convert batched string to sequences to kmers and return tokenizer
         """
-        batchKmers = [Helpers.kmer(seq, 6, Types.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
+        batchKmers = [Helpers.kmer(seq, Types.DEFAULT_DNABERT6_KMER_SIZE, Types.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
 
         return self.tokenizer(
             batchKmers,
@@ -261,11 +267,11 @@ class DNABERT6:
                 learning_rate               = self.learningRate,
                 weight_decay                = self.weightDecay,
                 warmup_ratio                = self.warmupRatio,
-                eval_strategy               = "epoch",
-                save_strategy               = "epoch",
-                logging_strategy            = "epoch",
+                eval_strategy               = self.strategy,
+                save_strategy               = self.strategy,
+                logging_strategy            = self.strategy,
                 load_best_model_at_end      = True,
-                metric_for_best_model       = "f1",
+                metric_for_best_model       = self.metric,
                 greater_is_better           = True,
                 max_grad_norm               = 1.0,
             )
@@ -283,7 +289,7 @@ class DNABERT6:
             self.tokenizer.save_pretrained(self.saveDirectory)
             print(f"✓ Fine-tuned model saved to  {Path(self.saveDirectory).resolve()}")
 
-    def embeddings(self, sequences):
+    def embeddings(self, sequences) -> np.array:
         
         """
         Return an (N, D) NumPy matrix of embeddings. Default size
@@ -301,7 +307,7 @@ class DNABERT6:
             for i in range(0, len(sequences), self.embeddingsBatchSize):
 
                 batch = sequences[i : i + self.embeddingsBatchSize]
-                batchedKmers = [Helpers.kmer(seq, 6, Types.KmerAmbiguousState.MASK) for seq in batch]
+                batchedKmers = [Helpers.kmer(seq, Types.DEFAULT_DNABERT6_KMER_SIZE, Types.KmerAmbiguousState.MASK) for seq in batch]
 
                 toks  = self.tokenizer(
                     batchedKmers,

@@ -22,12 +22,10 @@ python3 dataRead.py --codingFastaPath="data/coding_smORFs.fa" --nonCodingFastaPa
         --projectionState 0 \
         --saveDirectory dnabert6_smorfs_ft
     
-    (b) Load finetuned dnabert6 model, extract embeddings and compute other features from a sequences csv.
+    (b) Load finetuned dnabert6 model, extract embeddings and compute other features from a sequences csv file.
+        Save features.pt file with seqeunces, labels, 1hot encoded sequences and embeddings from dnabert6
 
-        python featureExtract.py features \
+        python3 featureExtract.py features \
         --modelDirectory dnabert6_smorfs_ft \
-        --sequencesPath sequences.fasta \
-        --saveFeaturesPath emb.npy \
-        --hiddenState cls \
-        --projectionDimension None \
-        --projectionState 0
+        --sequencesPath train.csv \
+        --saveFeaturesPath features.pt

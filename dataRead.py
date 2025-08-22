@@ -3,7 +3,7 @@ import csv
 from Bio import SeqIO
 from pathlib import Path
 from computationalFeatures import firstORFLength
-import Types as tp
+import Types
 
 def readFasta(path: str, label: int) -> None:
     """
@@ -13,9 +13,7 @@ def readFasta(path: str, label: int) -> None:
         cleaned = cleanup(record.seq)
         toCsv(cleaned, label)
 
-    
-
-def cleanup(seq: str, size: int = tp.DEFAULT_WINDOW_SIZE) -> str:
+def cleanup(seq: str, size: int = Types.DEFAULT_DNABERT6_WINDOW_SIZE) -> str:
     """
     Return an upper-case, ambiguity-free DNA string of exactly pad_to length.
     Truncates if longer.
