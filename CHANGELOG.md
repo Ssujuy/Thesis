@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 24 Aug 2025
+
+1. Fixed Types format, added Defaults for Convolution block.
+2. Added Convolution block: Conv1d --> BatchNorm --> activation --> dropout.
+
 ## 22 Aug 2025
 
 1. Added python script featureExtract.py where:
