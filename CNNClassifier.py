@@ -9,7 +9,7 @@ class ConvolutionBlock(nn.Module):
     - GELU is a strong modern activation
 
     Where:
-    1. kernelWidth: number of adjacent positiona single filter looks at.
+    1. kernel: number of adjacent positiona single filter looks at.
     2. stride: how far the kernel moves during each step.
     3. padding: ensures edge positions get full windows and layer shapes stay compatible.
     4. dilation: spacing between kernel taps.
@@ -22,7 +22,7 @@ class ConvolutionBlock(nn.Module):
             self,
             inputChannels: int,
             outputChannels: int,
-            kernelWidth: int,
+            kernel: int,
             stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
             padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
             dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
@@ -34,12 +34,12 @@ class ConvolutionBlock(nn.Module):
 
         if padding is None:
             # "Same" padding for odd kernels under given dilation.
-            padding = (dilation * (kernelWidth - 1)) // 2
+            padding = (dilation * (kernel - 1)) // 2
 
         self.conv1d = nn.Conv1d(
             inputChannels,
             outputChannels,
-            kernelWidth,
+            kernel,
             stride=stride,
             padding=padding,
             dilation=dilation,
@@ -57,3 +57,16 @@ class ConvolutionBlock(nn.Module):
         x = self.activation(x)
         x = self.dropout(x)
         return x
+    
+# class ResidualBlock(nn.Module):
+#     """
+#     2x (ConvBNAct) with residual skip (ResNet idea)
+#     Dilation expands effective receptive field without pooling
+#     """
+#     def __init__(self, ch: int, k: int = 3, dilation: int = 1, dropout: float = 0.0):
+#         super().__init__()
+#         self.conv1 = ConvBNAct(ch, ch, k, dilation=dilation, dropout=dropout)
+#         self.conv2 = ConvBNAct(ch, ch, k, dilation=dilation, dropout=dropout)
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         return x + self.conv2(self.conv1(x))
