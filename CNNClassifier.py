@@ -58,15 +58,93 @@ class ConvolutionBlock(nn.Module):
         x = self.dropout(x)
         return x
     
-# class ResidualBlock(nn.Module):
-#     """
-#     2x (ConvBNAct) with residual skip (ResNet idea)
-#     Dilation expands effective receptive field without pooling
-#     """
-#     def __init__(self, ch: int, k: int = 3, dilation: int = 1, dropout: float = 0.0):
-#         super().__init__()
-#         self.conv1 = ConvBNAct(ch, ch, k, dilation=dilation, dropout=dropout)
-#         self.conv2 = ConvBNAct(ch, ch, k, dilation=dilation, dropout=dropout)
+class ResidualBlock(nn.Module):
+    """
+    Defining 2 Convolution Block classes. This class computes a residual mapping
+    y = x + F(x) introduced by ResNets. inputChannels length is equal to output channels length.
+    """
+    def __init__(
+            self,
+            inputChannels: int,
+            kernel: int,
+            stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
+            padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
+            dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
+            groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
+            activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
+            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT
+        ):
+        super().__init__()
+        
+        self.convolution1 = ConvolutionBlock(
+            inputChannels,
+            inputChannels,
+            kernel,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            activation=activation,
+            dropout=dropout
+        )
 
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#         return x + self.conv2(self.conv1(x))
+        self.convolution2 = ConvolutionBlock(
+            inputChannels,
+            inputChannels,
+            kernel,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            activation=activation,
+            dropout=dropout
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.convolution2(self.convolution1(x))
+
+class MultiKernelConvolution(nn.Module):
+    """
+    Parallel convs with different kernel widths (e.g., 3/7/11/15)
+    Captures short motifs (codons, start/stop) and longer context.
+    """
+    def __init__(
+            self,
+            inputChannels: int,
+            outputChannelsKernel: int   = Types.DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUTCH,
+            kernelList: list            = Types.DEFAULT_MULTI_KERNEL_KERNEL_LIST,
+            stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
+            padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
+            dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
+            groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
+            activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
+            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT
+        ):
+        super().__init__()
+
+        self.branches = []
+
+        for kernel in kernelList:
+            conv = ConvolutionBlock(
+                inputChannels,
+                outputChannelsKernel,
+                kernel,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                activation=activation,
+                dropout=dropout
+            )
+            self.branches.append(conv)
+        
+        self.outputChannels = outputChannelsKernel * len(kernelList)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        output = []
+
+        for branch in self.branches:
+            output.append(branch(x))
+
+        return torch.cat(output, dim=1)

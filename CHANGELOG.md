@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 27 Aug 2025
+
+1. Adding Residual Block to use ResNet idea of a residual mapping, easier to learn residual correction F(x)=H(x)-x than H(x).
+2. Adding MultiKernel Convolution that creates parallel convolution with different kernel width,
+   capturing more short motifs and features by changing the width of the filter.
+
 ## 24 Aug 2025
 
 1. Fixed Types format, added Defaults for Convolution block.

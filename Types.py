@@ -21,17 +21,22 @@ DEFAULT_DNABER6_METRIC:                     str         = "f1"
 ### end
 
 ### Pytorch file printing defaults
-DEFAULT_PT_ROWS_PRINT:          int         = 6
-DEFAULT_PT_LENGTH_PRINT:        int         = 10
+DEFAULT_PT_ROWS_PRINT:                      int         = 6
+DEFAULT_PT_LENGTH_PRINT:                    int         = 10
 ### end
 
 ### Convolution Block Defaults
-DEFAULT_CONVOLUTION_PADDING                 = None
-DEFAULT_CONVOLUTION_DILATION:   int         = 1
-DEFAULT_CONVOLUTION_STRIDE:     int         = 1
-DEFAULT_CONVOLUTION_GROUPS:     int         = 1
-DEFAULT_CONVOLUTION_ACTIVATION: str         = "gelu"
-DEFAULT_CONVOLUTION_DROPOUT:    float       = 0.0
+DEFAULT_CONVOLUTION_PADDING                             = None
+DEFAULT_CONVOLUTION_DILATION:               int         = 1
+DEFAULT_CONVOLUTION_STRIDE:                 int         = 1
+DEFAULT_CONVOLUTION_GROUPS:                 int         = 1
+DEFAULT_CONVOLUTION_ACTIVATION:             str         = "gelu"
+DEFAULT_CONVOLUTION_DROPOUT:                float       = 0.0
+### end
+
+### Multi Kernel convolution Defaults
+DEFAULT_MULTI_KERNEL_KERNEL_LIST:           list        = [3,5,7,11,15]
+DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUTCH:   int         = 64
 ### end
 
 activationFunctionMapping = {
