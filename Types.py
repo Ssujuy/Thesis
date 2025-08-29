@@ -39,6 +39,11 @@ DEFAULT_MULTI_KERNEL_KERNEL_LIST:           list        = [3,5,7,11,15]
 DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUTCH:   int         = 64
 ### end
 
+### Temporal Head Defaults
+DEFAULT_TEMPORAL_KERNEL_REDUCTION:           int         = 1
+DEFAULT_TEMPORAL_KERNEL_RESIDUAL:            int         = 3
+### end
+
 activationFunctionMapping = {
     "gelu":     nn.GELU(),
     "relu":     nn.ReLU(),

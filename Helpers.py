@@ -32,7 +32,7 @@ def kmer(sequence: str, k: int, ambiguousState: Types.KmerAmbiguousState):
 def sequenceTo1Hot(sequence: str)-> torch.Tensor:
     """
     Helper function to create 1-hot encoded tensor
-    from a DNA sequence input
+    from a DNA sequence input, padded to 512 default length.
     """
     encoded = torch.zeros(Types.DEFAULT_DNABERT6_WINDOW_SIZE,4)
     
