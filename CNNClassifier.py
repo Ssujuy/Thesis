@@ -33,24 +33,46 @@ class ConvolutionBlock(nn.Module):
         ):
         super().__init__()
 
+        self.inputChannels = inputChannels
+        self.outputChannels = outputChannels
+        self.kernel = kernel
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.activation = activation
+        self.dropout = dropout
+
         if padding is None:
             # "Same" padding for odd kernels under given dilation.
             padding = (dilation * (kernel - 1)) // 2
 
         self.conv1d = nn.Conv1d(
-            inputChannels,
-            outputChannels,
-            kernel,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
+            self.inputChannels,
+            self.outputChannels,
+            self.kernel,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups,
             bias=False
         )
 
         self.batchNormalization = nn.BatchNorm1d(outputChannels)
         self.activation = Types.activationFunctionMapping.get(activation)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+    def print(self) -> None:
+
+        print("Convolution Block Parameters:")
+        print(f" - Input Channels: {self.inputChannels}")
+        print(f" - Output Channels: {self.outputChannels}")
+        print(f" - Kernel: {self.kernel}")
+        print(f" - Stride: {self.stride}")
+        print(f" - Padding: {self.padding}")
+        print(f" - Groups: {self.groups}")
+        print(f" - Activation: {self.activation}")
+        print(f" - Dropout: {self.dropout}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1d(x)
@@ -76,30 +98,50 @@ class ResidualBlock(nn.Module):
             dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT
         ):
         super().__init__()
-        
+
+        self.inputChannels = inputChannels
+        self.kernel = kernel
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.activation = activation
+        self.dropout = dropout
+
         self.convolution1 = ConvolutionBlock(
-            inputChannels,
-            inputChannels,
-            kernel,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            activation=activation,
-            dropout=dropout
+            self.inputChannels,
+            self.inputChannels,
+            self.kernel,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups,
+            activation=self.activation,
+            dropout=self.dropout
         )
 
         self.convolution2 = ConvolutionBlock(
-            inputChannels,
-            inputChannels,
-            kernel,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            activation=activation,
-            dropout=dropout
+            self.inputChannels,
+            self.inputChannels,
+            self.kernel,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups,
+            activation=self.activation,
+            dropout=self.dropout
         )
+
+    def print(self) -> None:
+
+        print("Residual Block Parameters:")
+        print(f" - Input Channels: {self.inputChannels}")
+        print(f" - Kernel: {self.kernel}")
+        print(f" - Stride: {self.stride}")
+        print(f" - Padding: {self.padding}")
+        print(f" - Groups: {self.groups}")
+        print(f" - Activation: {self.activation}")
+        print(f" - Dropout: {self.dropout}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.convolution2(self.convolution1(x))
@@ -123,23 +165,46 @@ class MultiKernelConvolution(nn.Module):
         ):
         super().__init__()
 
+        self.inputChannels = inputChannels
+        self.outputChannelsKernel = outputChannelsKernel
+        self.kernelList = kernelList
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.activation = activation
+        self.dropout = dropout
+
         self.branches = nn.ModuleList()
 
         for kernel in kernelList:
             conv = ConvolutionBlock(
-                inputChannels,
-                outputChannelsKernel,
+                self.inputChannels,
+                self.outputChannelsKernel,
                 kernel,
-                stride=stride,
-                padding=padding,
-                dilation=dilation,
-                groups=groups,
-                activation=activation,
-                dropout=dropout
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+                activation=self.activation,
+                dropout=self.dropout
             )
             self.branches.append(conv)
         
         self.outputChannels = outputChannelsKernel * len(kernelList)
+
+    def print(self) -> None:
+
+        print("Multiple Kernel Convolution Parameters:")
+        print(f" - Input Channels: {self.inputChannels}")
+        print(f" - Output Channels per Kernel: {self.outputChannelsKernel}")
+        print(f" - Output Channels total: {self.outputChannels}")
+        print(f" - Kernel List: {self.kernelList}")
+        print(f" - Stride: {self.stride}")
+        print(f" - Padding: {self.padding}")
+        print(f" - Groups: {self.groups}")
+        print(f" - Activation: {self.activation}")
+        print(f" - Dropout: {self.dropout}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
@@ -159,33 +224,79 @@ class TemporalHead(nn.Module):
     def __init__(
         self,
         inputChannels,
-        hiddenChannels,
-        kernelResidual: int         = ,
-        kernerReduction: int        = ,
+        hiddenChannels: int         = Types.DEFAULT_TEMPORAL_HIDDEN_CHANNELS,
+        kernelResidual: int         = Types.DEFAULT_TEMPORAL_KERNEL_RESIDUAL,
+        kernerReduction: int        = Types.DEFAULT_TEMPORAL_KERNEL_REDUCTION,
         stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
         padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
-        dropout: float              = 
-        use_dilation: bool          = True,
-        residualBlocks: int
+        dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
+        multipleDilation: bool      = Types.DEFAULT_TEMPORAL_MULTI_DILATION,
+        residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB
         ):
         super().__init__()
 
+        self.inputChannels = inputChannels
+        self.hiddenChannels = hiddenChannels
+        self.kernelResidual = kernelResidual
+        self.kernelReduction = kernerReduction
+        self.stride = stride
+        self.padding = padding
+        self.groups = groups
+        self.activation = activation
+        self.dropout = dropout
+        self.multipleDilation = multipleDilation
+        self.residualBlocks = residualBlocks
+
         self.reduce = ConvolutionBlock(
-            in_ch,
-            hidden_ch,
-            k=1,
-            dropout=dropout,
-            activation=act
+            self.inputChannels,
+            self.hiddenChannels,
+            self.kernelReduction,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=Types.DEFAULT_CONVOLUTION_DILATION,
+            groups=self.groups,
+            activation=self.activation,
+            dropout=self.dropout
         )
 
         blocks = []
-        for i in range(num_blocks):
-            dil = 2**i if use_dilation else 1
-            blocks.append(ResidualBlock(hidden_ch, k=3, dilation=dil, dropout=dropout,
-                                        act=act, act_kwargs=act_kwargs))
-        self.blocks = nn.Sequential(*blocks)
+
+        for i in range(self.residualBlocks):
+            dilation = 2**i if self.multipleDilation else Types.DEFAULT_CONVOLUTION_DILATION
+            
+            blocks.append(
+                ResidualBlock(
+                    self.inputChannels,
+                    self.hiddenChannels,
+                    self.kernelResidual,
+                    stride=self.stride,
+                    padding=self.padding,
+                    dilation=dilation,
+                    groups=self.groups,
+                    activation=self.activation,
+                    dropout=self.dropout
+                )
+            )       
+        
+        self.residualBlocks = nn.Sequential(*blocks)
+
+    def print(self) -> None:
+
+        print("Temporal Head Parameters:")
+        print(f" - Input Channels: {self.inputChannels}")
+        print(f" - Hidden Channels: {self.hiddenChannels}")
+        print(f" - Kernel for Residual Block: {self.kernelResidual}")
+        print(f" - Kernel for size Reduction: {self.kernelReduction}")
+        print(f" - Stride: {self.stride}")
+        print(f" - Padding: {self.padding}")
+        print(f" - Groups: {self.groups}")
+        print(f" - Activation: {self.activation}")
+        print(f" - Dropout: {self.dropout}")
+        print(f" - Change Dilation for Residual Block: {self.multipleDilation}")
+        print(f" - Number of Residual blocks: {self.residualBlocks}")
+
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
@@ -195,7 +306,7 @@ class TemporalHead(nn.Module):
         """
         # refine features (length preserved)
         x = self.reduce(x)        # [B, C, L]
-        x = self.blocks(x)        # [B, C, L]
+        x = self.residualBlocks(x)        # [B, C, L]
 
         # broadcast mask over channels
         m = mask[:, None, :]                          # [B, 1, L]
@@ -232,45 +343,87 @@ class SmORFCNN(nn.Module):
     mask_embed:  [B,T] optional  # 1=valid
 
     Design notes (theory links):
-      - Local convs + weight sharing (translation equivariance) [T2]
-      - Multi-scale kernels capture motifs & context [T1]
-      - 1x1 conv to squeeze large E (NIN) [T3]
-      - Dilations increase receptive field efficiently [T4]
-      - Residual skips ease optimization [T5]
-      - Global pooling yields fixed-size representation [T3]
+      - Local convs + weight sharing (translation equivariance)
+      - Multi-scale kernels capture motifs & context
+      - 1x1 conv to squeeze large E (NIN)
+      - Dilations increase receptive field efficiently
+      - Residual skips ease optimization
+      - Global pooling yields fixed-size representation
     """
     def __init__(
         self,
-        use_onehot: bool = True,
-        use_embed: bool = True,
-        in_ch_onehot: int = 4,
-        embed_dim: int = 768,
-        ms_kernels_onehot: Sequence[int] = (3, 7, 11, 15),
-        ms_kernels_embed: Sequence[int] = (3, 7, 11),
-        branch_ch: int = 64,
-        head_hidden: int = 128,
-        head_blocks: int = 2,
-        dropout: float = 0.2,
-        num_classes: int = 1
+        onehotInputChannels: int,
+        embeddingsInputChannels: int,
+        onehotBranch: bool                      = Types.DEFAULT_SMORFCNN_ONEHOT_BRANCH,
+        embeddingsBranch: bool                  = Types.DEFAULT_SMORFCNN_EMBEDDINGS_BRANCH,
+        temporalHead: bool                      = Types.DEFAULT_SMORFCNN_TEMPORAL_HEAD,
+        multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
+        onehotKernelList: list                  = Types.DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST,
+        embeddingsKernelList: list              = Types.DEFAULT_SMORFCNN_EMBEDDINGS_KERNEL_LIST,
+        outputChannelsKernel: int               = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
+        temporalHeadOutputChannels: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL,
+        residualBlocks: int                     = Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS,
+        dropout: float                          = Types.DEFAULT_SMORFCNN_DROPOUT,
+        classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES
     ):
         super().__init__()
-        assert use_onehot or use_embed, "Enable at least one input branch."
-        self.use_onehot = use_onehot
-        self.use_embed = use_embed
 
-        if use_onehot:
-            self.stem_onehot = MultiScaleStem(in_ch_onehot, out_ch_per_branch=branch_ch,
-                                              kernels=ms_kernels_onehot, dropout=dropout)
-            self.head_onehot = TemporalHead(self.stem_onehot.out_ch, hidden_ch=head_hidden,
-                                            num_blocks=head_blocks, dropout=dropout)
+        self.onehotInputChannels = onehotInputChannels
+        self.embeddingsInputChannels =  embeddingsInputChannels
 
-        if use_embed:
-            squeeze_ch = min(256, embed_dim)  # 1x1 conv squeeze [T3]
-            self.squeeze_embed = ConvBNAct(embed_dim, squeeze_ch, k=1, dropout=dropout)
-            self.stem_embed = MultiScaleStem(squeeze_ch, out_ch_per_branch=branch_ch,
-                                             kernels=ms_kernels_embed, dropout=dropout)
-            self.head_embed = TemporalHead(self.stem_embed.out_ch, hidden_ch=head_hidden,
-                                           num_blocks=head_blocks, dropout=dropout)
+        self.onehotBranch = onehotBranch 
+        self.embeddingsBranch = embeddingsBranch
+        self.temporalHead = temporalHead
+        self.multiKernel = multiKernel
+        self.onehotKernelList = onehotKernelList
+        self.embeddingsKernelList = embeddingsKernelList
+        self.outputChannelsKernel = outputChannelsKernel
+        self.temporalHeadOutputChannels = temporalHeadOutputChannels
+        self.residualBlocks = residualBlocks
+        self.dropout = dropout
+        self.classes = classes
+
+        self.onehotMultiKernelClass = None
+        self.onehotTemporalClass = None
+        self.embeddingsMultiKernelClass = None
+        self.embeddingsTemporalClass = None
+
+        if self.onehotBranch:
+
+            if self.multiKernel:
+                self.onehotMultiKernelClass = MultiKernelConvolution(
+                    inputChannels=self.onehotInputChannels,
+                    outputChannelsKernel=self.outputChannelsKernel,
+                    kernelList=self.onehotKernelList,
+                    dropout=self.dropout
+                )
+            
+            if self.temporalHead:
+                self.onehotTemporalClass = TemporalHead(
+                    self.onehotMultiKernelClass.outputChannels,
+                    hiddenChannels=self.temporalHeadOutputChannels,
+                    residualBlocks=self.residualBlocks,
+                    dropout=self.dropout
+                )
+
+        if self.embeddingsBranch:
+
+            if self.multiKernel:
+                self.embeddingsMultiKernelClass = MultiKernelConvolution(
+                    inputChannels=self.embeddingsInputChannels,
+                    outputChannelsKernel=self.outputChannelsKernel,
+                    kernelList=self.embeddingsKernelList,
+                    dropout=self.dropout
+                )
+
+            if self.temporalHead:
+                self.embeddingsTemporalClass = TemporalHead(
+                    inputChannels=self.embeddingsMultiKernelClass.outputChannels,
+                    hiddenChannels=self.temporalHeadOutputChannels,
+                    residualBlocks=self.residualBlocks,
+                    dropout=self.dropout
+                )
+        self.fusedDim
 
         fused_dim = (2 * head_hidden) * (int(use_onehot) + int(use_embed))
         self.classifier = nn.Sequential(

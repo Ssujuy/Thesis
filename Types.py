@@ -40,8 +40,26 @@ DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUTCH:   int         = 64
 ### end
 
 ### Temporal Head Defaults
+DEFAULT_TEMPORAL_HIDDEN_CHANNELS:            int         = 128
 DEFAULT_TEMPORAL_KERNEL_REDUCTION:           int         = 1
 DEFAULT_TEMPORAL_KERNEL_RESIDUAL:            int         = 3
+DEFAULT_TEMPORAL_DROPOUT:                    float       = 0.1
+DEFAULT_TEMPORAL_MULTI_DILATION:             bool        = True
+DEFAULT_RESIDUAL_BLOCKS_NMB:                 int         = 2
+### end
+
+### smORFs CNN Classifier Defaults
+DEFAULT_SMORFCNN_ONEHOT_BRANCH:              bool        = True
+DEFAULT_SMORFCNN_EMBEDDINGS_BRANCH:          bool        = True
+DEFAULT_SMORFCNN_TEMPORAL_HEAD:              bool        = True
+DEFAULT_SMORFCNN_MULTI_KERNEL:               bool        = True
+DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST:         list        = [3,5,7,11,15]
+DEFAULT_SMORFCNN_EMBEDDINGS_KERNEL_LIST:     list        = [3,11]
+DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL:     int         = 64
+DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL:   int         = 128
+DEFAULT_SMORFCNN_RESIDUAL_BLOCKS:            int         = 2
+DEFAULT_SMORFCNN_DROPOUT:                    float       = 0.1
+DEFAULT_SMORFCNN_CLASSES:                    int         = 1
 ### end
 
 activationFunctionMapping = {
