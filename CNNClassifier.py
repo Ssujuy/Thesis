@@ -1,5 +1,6 @@
 import Types, Helpers
-import torch
+import torch,os,random
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -354,6 +355,7 @@ class SmORFCNN(nn.Module):
         self,
         onehotInputChannels: int,
         embeddingsInputChannels: int,
+        featuresPath: str,
         onehotBranch: bool                      = Types.DEFAULT_SMORFCNN_ONEHOT_BRANCH,
         embeddingsBranch: bool                  = Types.DEFAULT_SMORFCNN_EMBEDDINGS_BRANCH,
         temporalHead: bool                      = Types.DEFAULT_SMORFCNN_TEMPORAL_HEAD,
@@ -364,9 +366,36 @@ class SmORFCNN(nn.Module):
         temporalHeadOutputChannels: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL,
         residualBlocks: int                     = Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS,
         dropout: float                          = Types.DEFAULT_SMORFCNN_DROPOUT,
-        classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES
+        classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
+        classifierOutput: int                   = Types.DEFAULT_SMORFCNN_CLASSIFIER_OUTPUT,
+        seed: int                               = Types.DEFAULT_SMORFCNN_SEED,
+        deterministic: bool                     = Types.DEFAULT_SMORFCNN_DETERMINISTIC,
+        device: str                             = Types.DEFAULT_SMORFCNN_DEVICE
     ):
         super().__init__()
+
+        self.seed = seed
+        self.deterministic = deterministic
+        self.device = device
+        self.featuresPath = featuresPath
+
+        os.environ["PYTHONHASHSEED"] = str(seed)
+        random.seed(seed)
+        np.random.seed(seed)
+
+        torch.manual_seed(seed)
+        if self.device == 'cuda':
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+
+        if self.deterministic:
+            # Make ops deterministic where possible
+            try:
+                torch.use_deterministic_algorithms(True)
+            except Exception:
+                pass
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
@@ -382,6 +411,7 @@ class SmORFCNN(nn.Module):
         self.residualBlocks = residualBlocks
         self.dropout = dropout
         self.classes = classes
+        self.classifierOutput = classifierOutput
 
         self.onehotMultiKernelClass = None
         self.onehotTemporalClass = None
@@ -423,44 +453,136 @@ class SmORFCNN(nn.Module):
                     residualBlocks=self.residualBlocks,
                     dropout=self.dropout
                 )
-        self.fusedDim
+        
+        self.fusedDim = 0
 
-        fused_dim = (2 * head_hidden) * (int(use_onehot) + int(use_embed))
+        if self.onehotBranch:
+            if self.temporalHead:
+                # TemporalHead returns [B, 2 * hiddenChannels]
+                self.fusedDim += 2 * self.temporalHeadOutputChannels
+            elif self.multiKernel:
+                # If no TemporalHead, assume later pooling on MultiKernel output
+                self.fusedDim += 2 * (self.outputChannelsKernel * len(self.onehotKernelList))
+            else:
+                # If neither head nor multikernel, assume pooling on raw input
+                self.fusedDim += 2 * self.onehotInputChannels
+
+        if self.embeddingsBranch:
+            if self.temporalHead:
+                self.fusedDim += 2 * self.temporalHeadOutputChannels
+            elif self.multiKernel:
+                self.fusedDim += 2 * (self.outputChannelsKernel * len(self.embeddingsKernelList))
+            else:
+                self.fusedDim += 2 * self.embeddingsInputChannels
+
         self.classifier = nn.Sequential(
-            nn.Linear(fused_dim, 256),
+            nn.Linear(self.fusedDim, self.classifierOutput),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(256, num_classes)
+            nn.Linear(self.classifierOutput, self.classes)
         )
 
-    def forward(self,
-                x_onehot: Optional[torch.Tensor] = None,
-                x_embed: Optional[torch.Tensor] = None,
-                mask_onehot: Optional[torch.Tensor] = None,
-                mask_embed: Optional[torch.Tensor] = None,
-                rc_augment: bool = False) -> torch.Tensor:
+        dataset = Helpers.Dataset(self.featuresPath)
+        self.trainDataset, self.validationDataset, self.testDataset = Helpers.shuffleSPlitTDataset(
+            dataset,
+            Types.DEFAULT_SMORFCNN_TRAIN_SPLIT,
+            Types.DEFAULT_SMORFCNN_VALIDATION_SPLIT,
+            Types.DEFAULT_SMORFCNN_TEST_SPLIT,
+            Types.DEFAULT_SMORFCNN_SEED
+        )
 
-        def forward_once(x1, x2, m1, m2):
-            feats = []
-            if self.use_onehot:
-                h = self.stem_onehot(x1)                    # [B,C,L]
-                f = self.head_onehot(h, m1)                 # [B,2H]
+    def forward(
+        self,
+        xOnehot: torch.Tensor = None,   # [B, C1, L]
+        xEmbed:  torch.Tensor = None,   # [B, C2, T]
+        maskOnehot: torch.Tensor = None,# [B, L]   (1=valid, 0=pad)
+        maskEmbed:  torch.Tensor = None,# [B, T]   (1=valid, 0=pad)
+        # rc_augment: bool = False
+    ) -> torch.Tensor:
+        """
+        Returns:
+        logits: [B] if self.classes==1 else [B, self.classes]
+        """
+
+        # ---- helper: masked global pooling (max ⊕ avg) -> [B, 2*C] ----
+        def masked_pool(feat: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+            # feat: [B, C, L], mask: [B, L] (binary, right-padded but general mask works)
+            assert mask is not None, "Mask is required for masked pooling"
+            m = mask[:, None, :].to(dtype=feat.dtype)        # [B,1,L]
+            # max over valid positions only
+            x_neg_inf = feat.masked_fill(m == 0, float("-inf"))
+            gmax = x_neg_inf.max(dim=-1).values              # [B, C]
+            gmax = torch.where(torch.isfinite(gmax), gmax, torch.zeros_like(gmax))
+            # average over valid positions only
+            x_zero = feat * m
+            denom = m.sum(dim=-1).clamp(min=1.0)             # [B,1]
+            gavg = x_zero.sum(dim=-1) / denom                # [B, C]
+            return torch.cat([gmax, gavg], dim=1)            # [B, 2*C]
+
+    # ---- one pass through the network (no RC averaging) ----
+        def forward_once(x1, x2, m1, m2) -> torch.Tensor:
+            feats: list[torch.Tensor] = []
+
+            # ----- One-hot branch -----
+            if self.onehotBranch:
+                assert x1 is not None and m1 is not None, "onehotBranch=True but x_onehot/mask_onehot not provided"
+                h = x1                                          # [B, C1, L]
+                if self.multiKernel and (self.onehotMultiKernelClass is not None):
+                    h = self.onehotMultiKernelClass(h)           # [B, Cmk1, L]
+                if self.temporalHead and (self.onehotTemporalClass is not None):
+                    f = self.onehotTemporalClass(h, m1)          # [B, 2*hidden]
+                else:
+                    f = masked_pool(h, m1)                       # [B, 2*C(h)]
                 feats.append(f)
-            if self.use_embed:
-                z = self.squeeze_embed(x2)                  # [B,C,T]
-                z = self.stem_embed(z)                      # [B,C',T]
-                g = self.head_embed(z, m2)                  # [B,2H]
-                feats.append(g)
-            fused = feats[0] if len(feats) == 1 else torch.cat(feats, dim=1)
-            logits = self.classifier(fused).squeeze(-1)     # [B] if num_classes=1
-            return logits
 
-        # Reverse-complement test-time augmentation on one-hot branch only.
-        if rc_augment and (x_onehot is not None):
-            logits_fwd = forward_once(x_onehot, x_embed, mask_onehot, mask_embed)
-            x_rc = onehot_reverse_complement(x_onehot)
-            logits_rc = forward_once(x_rc, x_embed, mask_onehot, mask_embed)
-            return 0.5 * (logits_fwd + logits_rc)
-        else:
-            return forward_once(x_onehot, x_embed, mask_onehot, mask_embed)
+            # ----- Embeddings branch -----
+            if self.embeddingsBranch:
+                assert x2 is not None and m2 is not None, "embeddingsBranch=True but x_embed/mask_embed not provided"
+                z = x2                                          # [B, C2, T]
+                if self.multiKernel and (self.embeddingsMultiKernelClass is not None):
+                    z = self.embeddingsMultiKernelClass(z)       # [B, Cmk2, T]
+                if self.temporalHead and (self.embeddingsTemporalClass is not None):
+                    g = self.embeddingsTemporalClass(z, m2)      # [B, 2*hidden]
+                else:
+                    g = masked_pool(z, m2)                       # [B, 2*C(z)]
+                feats.append(g)
+
+            # fuse features and classify
+            assert len(feats) > 0, "No active branches produced features"
+            fused = feats[0] if len(feats) == 1 else torch.cat(feats, dim=1)  # [B, fusedDim]
+            logits = self.classifier(fused)                                     # [B, classes] or [B,1]
+            return logits.squeeze(-1) if self.classes == 1 else logits
         
+        return forward_once(xOnehot, xEmbed, maskOnehot, maskEmbed)
+
+    def trainEpoch(
+            self,
+            data,
+            optimizer: torch.optim.Optimizer,
+            maxGradNorm: float      = Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
+            threshold: float        = Types.DEFAULT_SMORFCNN_THRESHOLD
+        ) -> dict:
+        
+        """
+        Trainer function
+        """
+
+        self.train()
+
+        loss = 0.0
+        n = 0
+        all_probs = []
+        all_targets = []
+
+        lossFunction = torch.nn.BCEWithLogitsLoss()
+
+        return
+
+    def validateEpoch():
+        return
+    def fit():
+        return
+    def kFoldCrossValidation():
+        return
+    def saveModel() -> None:
+        return

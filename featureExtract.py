@@ -85,7 +85,7 @@ def featureExtraction(
     labelTensor = torch.tensor([int(x) for x in labels], dtype=torch.long)
 
     # Optional metadata (handy for debugging/repro)
-    meta = {
+    metadata = {
         "model_dir": str(Path(modelDirectory).resolve()),
         "hidden_state": getattr(hiddenState, "name", str(hiddenState)),
         "projection_state": getattr(projectionState, "name", str(projectionState)),
@@ -94,47 +94,16 @@ def featureExtraction(
         "embedding_dim": int(embedTensor.shape[1]),
         "num_samples": len(sequences),
     }
+    Helpers.saveFeaturesPtFile(
+        saveFeaturesPath,
+        sequences,
+        onehotTensor,
+        embedTensor,
+        labelTensor,
+        metadata
+    )
 
-    # Save everything in one .pt file
-    payload = {
-        "sequences": sequences,
-        "onehot": onehotTensor,
-        "embeddings": embedTensor,
-        "labels": labelTensor,
-        "meta": meta,
-    }
-    saveFeaturesPath = Path(saveFeaturesPath)
-    torch.save(payload, saveFeaturesPath)
-
-    print(f"✓ Saved {len(sequences)} samples to {saveFeaturesPath.resolve()}")
-    print(f"   onehot:      {tuple(onehotTensor.shape)}")
-    print(f"   embeddings:  {tuple(embedTensor.shape)}")
-    print(f"   labels:      {tuple(labelTensor.shape)}")
-
-    printPt(saveFeaturesPath)
-
-def printPt(
-        saveFeaturesPath: str,
-        rows:int =Types.DEFAULT_PT_ROWS_PRINT,
-        dim: int =Types.DEFAULT_PT_LENGTH_PRINT
-    ):
-
-    saveFeaturesPath = Path(saveFeaturesPath)
-    ptFile = torch.load(saveFeaturesPath, map_location="cpu")
-
-    print(f"Printing first {rows} rows of {saveFeaturesPath.resolve()} for sanity check.")
-
-    oh = ptFile["onehot"][:rows, :dim, :].to(torch.int8).cpu().tolist()
-    emb = ptFile["embeddings"][:rows, :dim].cpu().numpy().tolist()
-
-    df = pd.DataFrame({
-        "sequence": ptFile["sequences"][:rows],
-        "label": ptFile["labels"][:rows].tolist(),
-        "onehot": oh,
-        "embeddings": emb
-    })
-
-    print(df)
+    Helpers.printPt(saveFeaturesPath)
 
 if __name__ == "__main__":
 

@@ -60,6 +60,17 @@ DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL:   int         = 128
 DEFAULT_SMORFCNN_RESIDUAL_BLOCKS:            int         = 2
 DEFAULT_SMORFCNN_DROPOUT:                    float       = 0.1
 DEFAULT_SMORFCNN_CLASSES:                    int         = 1
+DEFAULT_SMORFCNN_CLASSIFIER_OUTPUT:          int         = 256
+DEFAULT_SMORFCNN_SEED:                       int         = 42
+DEFAULT_SMORFCNN_DETERMINISTIC:              bool        = True 
+DEFAULT_SMORFCNN_DEVICE:                     str         = "cuda" if torch.cuda.is_available() else "cpu"
+DEFAULT_SMORFCNN_TRAIN_SPLIT:                float       = 0.8
+DEFAULT_SMORFCNN_VALIDATION_SPLIT:           float       = 0.1
+DEFAULT_SMORFCNN_TEST_SPLIT:                 float       = 0.1
+DEFAULT_SMORFCNN_THRESHOLD:                  float       = 0.5
+DEFAULT_SMORFCNN_MAX_GRAD_NORM:              float       = 1.0
+DEFAULT_SMORFCNN_LEARNING_RATE:              float       = 1e-3
+DEFAULT_SMORFCNN_WEIGHT_DECAY:               float       = 1e-4
 ### end
 
 activationFunctionMapping = {
