@@ -302,29 +302,23 @@ class TemporalHead(nn.Module):
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
         x:    [B, C, L]   feature map
-        mask: [B, L]      1 for valid tokens, 0 for right-padded tail (length==512 for all samples)
+        mask: [B, L]      1 for valid tokens, 0 for right-padded tail.
+
+        1. Project to 128 size
+        2. Calculate residualBlocks number of Residuals sequentially.
+        3. Calculate global max pooling and global average pooling, then concatenate.
+
         returns: [B, 2*C] (global-max ⊕ masked-global-avg)
         """
         # refine features (length preserved)
         x = self.reduce(x)        # [B, C, L]
         x = self.residualBlocks(x)        # [B, C, L]
 
-        # broadcast mask over channels
-        m = mask[:, None, :]                          # [B, 1, L]
-        m_float = m.to(dtype=x.dtype)
-
-        # MASKED GLOBAL MAX: padded positions -> -inf so they can’t win the max
-        x_neg_inf = x.masked_fill(m == 0, float("-inf"))
-        gmax = x_neg_inf.max(dim=-1).values          # [B, C]
-        # guard against fully-masked rows (shouldn't occur with right-padding)
-        gmax = torch.where(torch.isfinite(gmax), gmax, torch.zeros_like(gmax))
-
-        # MASKED GLOBAL AVG: zero-out padded, divide by count of valid steps
-        x_zero = x * m_float                          # zero padded positions
-        denom = m_float.sum(dim=-1).clamp(min=1.0)    # [B, 1]
-        gavg = x_zero.sum(dim=-1) / denom             # [B, C]
-
-        return torch.cat([gmax, gavg], dim=1)         # [B, 2*C]
+        return torch.cat([
+                Helpers.globalMaxPooling(x, mask),
+                Helpers.globalAveragePooling(x, mask)],
+                dim=1
+        )         # [B, 2*C]
 
     
 
@@ -356,8 +350,6 @@ class SmORFCNN(nn.Module):
         onehotInputChannels: int,
         embeddingsInputChannels: int,
         featuresPath: str,
-        onehotBranch: bool                      = Types.DEFAULT_SMORFCNN_ONEHOT_BRANCH,
-        embeddingsBranch: bool                  = Types.DEFAULT_SMORFCNN_EMBEDDINGS_BRANCH,
         temporalHead: bool                      = Types.DEFAULT_SMORFCNN_TEMPORAL_HEAD,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         onehotKernelList: list                  = Types.DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST,
@@ -400,8 +392,6 @@ class SmORFCNN(nn.Module):
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
 
-        self.onehotBranch = onehotBranch 
-        self.embeddingsBranch = embeddingsBranch
         self.temporalHead = temporalHead
         self.multiKernel = multiKernel
         self.onehotKernelList = onehotKernelList
@@ -418,62 +408,39 @@ class SmORFCNN(nn.Module):
         self.embeddingsMultiKernelClass = None
         self.embeddingsTemporalClass = None
 
-        if self.onehotBranch:
-
-            if self.multiKernel:
-                self.onehotMultiKernelClass = MultiKernelConvolution(
-                    inputChannels=self.onehotInputChannels,
-                    outputChannelsKernel=self.outputChannelsKernel,
-                    kernelList=self.onehotKernelList,
-                    dropout=self.dropout
-                )
+        if self.multiKernel:
+            self.onehotMultiKernelClass = MultiKernelConvolution(
+                inputChannels=self.onehotInputChannels,
+                outputChannelsKernel=self.outputChannelsKernel,
+                kernelList=self.onehotKernelList,
+                dropout=self.dropout
+            )
             
-            if self.temporalHead:
-                self.onehotTemporalClass = TemporalHead(
-                    self.onehotMultiKernelClass.outputChannels,
-                    hiddenChannels=self.temporalHeadOutputChannels,
-                    residualBlocks=self.residualBlocks,
-                    dropout=self.dropout
-                )
+        if self.temporalHead:
+            self.onehotTemporalClass = TemporalHead(
+                self.onehotMultiKernelClass.outputChannels,
+                hiddenChannels=self.temporalHeadOutputChannels,
+                residualBlocks=self.residualBlocks,
+                dropout=self.dropout
+            )
 
-        if self.embeddingsBranch:
+        if self.multiKernel:
+            self.embeddingsMultiKernelClass = MultiKernelConvolution(
+                inputChannels=self.embeddingsInputChannels,
+                outputChannelsKernel=self.outputChannelsKernel,
+                kernelList=self.embeddingsKernelList,
+                dropout=self.dropout
+            )
 
-            if self.multiKernel:
-                self.embeddingsMultiKernelClass = MultiKernelConvolution(
-                    inputChannels=self.embeddingsInputChannels,
-                    outputChannelsKernel=self.outputChannelsKernel,
-                    kernelList=self.embeddingsKernelList,
-                    dropout=self.dropout
-                )
+        if self.temporalHead:
+            self.embeddingsTemporalClass = TemporalHead(
+                inputChannels=self.embeddingsMultiKernelClass.outputChannels,
+                hiddenChannels=self.temporalHeadOutputChannels,
+                residualBlocks=self.residualBlocks,
+                dropout=self.dropout
+            )
 
-            if self.temporalHead:
-                self.embeddingsTemporalClass = TemporalHead(
-                    inputChannels=self.embeddingsMultiKernelClass.outputChannels,
-                    hiddenChannels=self.temporalHeadOutputChannels,
-                    residualBlocks=self.residualBlocks,
-                    dropout=self.dropout
-                )
-        
-        self.fusedDim = 0
-
-        if self.onehotBranch:
-            if self.temporalHead:
-                # TemporalHead returns [B, 2 * hiddenChannels]
-                self.fusedDim += 2 * self.temporalHeadOutputChannels
-            elif self.multiKernel:
-                # If no TemporalHead, assume later pooling on MultiKernel output
-                self.fusedDim += 2 * (self.outputChannelsKernel * len(self.onehotKernelList))
-            else:
-                # If neither head nor multikernel, assume pooling on raw input
-                self.fusedDim += 2 * self.onehotInputChannels
-
-        if self.embeddingsBranch:
-            if self.temporalHead:
-                self.fusedDim += 2 * self.temporalHeadOutputChannels
-            elif self.multiKernel:
-                self.fusedDim += 2 * (self.outputChannelsKernel * len(self.embeddingsKernelList))
-            else:
-                self.fusedDim += 2 * self.embeddingsInputChannels
+        self.fusedDim = self._calculateFusedDim()
 
         self.classifier = nn.Sequential(
             nn.Linear(self.fusedDim, self.classifierOutput),
@@ -491,69 +458,90 @@ class SmORFCNN(nn.Module):
             Types.DEFAULT_SMORFCNN_SEED
         )
 
+    def _calculateFusedDim(self) -> int:
+
+        temporalHeadDim = 4 * int(self.temporalHead) * self.temporalHeadOutputChannels
+        multiKernelDim = int(self.multiKernel) * (len(self.onehotKernelList) + len(self.embeddingsKernelList)) * self.outputChannelsKernel
+        poolingNoTemporalDim = (1 - self.temporalHead) * 2 * (self.embeddingsInputChannels + self.onehotInputChannels)
+
     def forward(
         self,
-        xOnehot: torch.Tensor = None,   # [B, C1, L]
-        xEmbed:  torch.Tensor = None,   # [B, C2, T]
-        maskOnehot: torch.Tensor = None,# [B, L]   (1=valid, 0=pad)
-        maskEmbed:  torch.Tensor = None,# [B, T]   (1=valid, 0=pad)
+        xOnehot: torch.Tensor,
+        xEmbeddings:  torch.Tensor,
+        maskOnehot: torch.Tensor,
+        maskEmbeddings:  torch.Tensor,
         # rc_augment: bool = False
     ) -> torch.Tensor:
         """
+        forward function that passes onehot encoded sequences/embeddings through
+        MultiKernel CNN and Temporal Head CNN (if branches are active!!).
+
+        xOnehot --> [B, C1, L] \n
+        xEmbeddings --> [B, C2, T] \n
+        maskOnehot --> [B, L] (1=valid, 0=pad) \n
+        maskEmbeddings --> [B, T] (1=valid, 0=pad) \n
+
         Returns:
         logits: [B] if self.classes==1 else [B, self.classes]
         """
 
-        # ---- helper: masked global pooling (max ⊕ avg) -> [B, 2*C] ----
-        def masked_pool(feat: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-            # feat: [B, C, L], mask: [B, L] (binary, right-padded but general mask works)
-            assert mask is not None, "Mask is required for masked pooling"
-            m = mask[:, None, :].to(dtype=feat.dtype)        # [B,1,L]
-            # max over valid positions only
-            x_neg_inf = feat.masked_fill(m == 0, float("-inf"))
-            gmax = x_neg_inf.max(dim=-1).values              # [B, C]
-            gmax = torch.where(torch.isfinite(gmax), gmax, torch.zeros_like(gmax))
-            # average over valid positions only
-            x_zero = feat * m
-            denom = m.sum(dim=-1).clamp(min=1.0)             # [B,1]
-            gavg = x_zero.sum(dim=-1) / denom                # [B, C]
-            return torch.cat([gmax, gavg], dim=1)            # [B, 2*C]
+        features = []
+        inputOneHot = xOnehot
+        inputEmbeddings = xEmbeddings
 
-    # ---- one pass through the network (no RC averaging) ----
-        def forward_once(x1, x2, m1, m2) -> torch.Tensor:
-            feats: list[torch.Tensor] = []
-
-            # ----- One-hot branch -----
-            if self.onehotBranch:
-                assert x1 is not None and m1 is not None, "onehotBranch=True but x_onehot/mask_onehot not provided"
-                h = x1                                          # [B, C1, L]
-                if self.multiKernel and (self.onehotMultiKernelClass is not None):
-                    h = self.onehotMultiKernelClass(h)           # [B, Cmk1, L]
-                if self.temporalHead and (self.onehotTemporalClass is not None):
-                    f = self.onehotTemporalClass(h, m1)          # [B, 2*hidden]
-                else:
-                    f = masked_pool(h, m1)                       # [B, 2*C(h)]
-                feats.append(f)
-
-            # ----- Embeddings branch -----
-            if self.embeddingsBranch:
-                assert x2 is not None and m2 is not None, "embeddingsBranch=True but x_embed/mask_embed not provided"
-                z = x2                                          # [B, C2, T]
-                if self.multiKernel and (self.embeddingsMultiKernelClass is not None):
-                    z = self.embeddingsMultiKernelClass(z)       # [B, Cmk2, T]
-                if self.temporalHead and (self.embeddingsTemporalClass is not None):
-                    g = self.embeddingsTemporalClass(z, m2)      # [B, 2*hidden]
-                else:
-                    g = masked_pool(z, m2)                       # [B, 2*C(z)]
-                feats.append(g)
-
-            # fuse features and classify
-            assert len(feats) > 0, "No active branches produced features"
-            fused = feats[0] if len(feats) == 1 else torch.cat(feats, dim=1)  # [B, fusedDim]
-            logits = self.classifier(fused)                                     # [B, classes] or [B,1]
-            return logits.squeeze(-1) if self.classes == 1 else logits
+        if xOnehot is None:
+            raise AttributeError("Did not receive onehot encoded input!")
         
-        return forward_once(xOnehot, xEmbed, maskOnehot, maskEmbed)
+        if xEmbeddings is None:
+            raise AttributeError("Did not receive dnabert6 embeddings input!")
+
+        if self.multiKernel:
+            inputOneHot = self.onehotMultiKernelClass(inputOneHot)
+
+        if self.temporalHead:
+            inputOneHot = self.onehotTemporalClass(inputOneHot, maskOnehot)
+            
+        else:
+
+            inputOneHot = torch.cat(
+                [
+                    Helpers.globalMaxPooling(inputOneHot, maskOnehot),
+                    Helpers.globalAveragePooling(inputOneHot, maskOnehot)
+                ],
+                    dim=1
+            )  
+
+        features.append(inputOneHot)
+
+
+        if self.multiKernel:
+            inputEmbeddings = self.embeddingsMultiKernelClass(inputEmbeddings)
+
+        if self.temporalHead:
+            inputEmbeddings = self.embeddingsTemporalClass(inputEmbeddings, maskEmbeddings)
+            
+        else:
+            
+            inputEmbeddings = torch.cat([
+                    Helpers.globalMaxPooling(inputEmbeddings, maskEmbeddings),
+                    Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
+                dim=1
+            )
+                
+        features.append(inputEmbeddings)
+        
+        if not features:
+            raise RuntimeError("Failed to produce any features!")
+        
+        fused = features[0] if len(features) == 1 else torch.cat(features, dim=1)
+
+        if fused.size(1) != self.fusedDim:
+            raise ValueError(f"Expected fused dimension {self.fusedDim} , got {fused.size(1)}")
+
+        logits = self.classifier(fused)
+
+        return logits.squeeze(-1) if self.classes == 1 else logits
+
 
     def trainEpoch(
             self,

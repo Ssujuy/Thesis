@@ -18,7 +18,6 @@ from sklearn.metrics import (
 
 ### The projection to fixed size needs to be tested with real data coding, non coding
 
-### read fasta file for prediction. 
 class DNABERT6:
 
     def __init__(

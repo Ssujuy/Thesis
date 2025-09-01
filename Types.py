@@ -2,6 +2,11 @@ from enum import Enum
 import torch
 import torch.nn as nn
 
+PRINT_BLUE = "\033[34m"
+PRINT_GREEN = "\033[32m"
+PRINT_RED = "\033[31m"
+PRINT_RESET = "\033[0m"
+
 ### DNABERT6 Defaults
 DEFAULT_DNABERT6_MODEL_ID:                  str         = "zhihan1996/DNA_bert_6"
 DEFAULT_DNABER6_DATASET_PATH:               str         = "train.csv"
@@ -49,8 +54,6 @@ DEFAULT_RESIDUAL_BLOCKS_NMB:                 int         = 2
 ### end
 
 ### smORFs CNN Classifier Defaults
-DEFAULT_SMORFCNN_ONEHOT_BRANCH:              bool        = True
-DEFAULT_SMORFCNN_EMBEDDINGS_BRANCH:          bool        = True
 DEFAULT_SMORFCNN_TEMPORAL_HEAD:              bool        = True
 DEFAULT_SMORFCNN_MULTI_KERNEL:               bool        = True
 DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST:         list        = [3,5,7,11,15]
