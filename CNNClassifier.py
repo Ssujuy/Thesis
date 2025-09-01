@@ -464,6 +464,8 @@ class SmORFCNN(nn.Module):
         multiKernelDim = int(self.multiKernel) * (len(self.onehotKernelList) + len(self.embeddingsKernelList)) * self.outputChannelsKernel
         poolingNoTemporalDim = (1 - self.temporalHead) * 2 * (self.embeddingsInputChannels + self.onehotInputChannels)
 
+        return temporalHeadDim + multiKernelDim + poolingNoTemporalDim
+
     def forward(
         self,
         xOnehot: torch.Tensor,
