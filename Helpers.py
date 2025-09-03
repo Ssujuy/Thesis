@@ -2,7 +2,7 @@ import torch
 from pathlib import Path
 import pandas as pd
 from datasets import load_dataset, DatasetDict, Dataset
-from torch.utils.data import TensorDataset, random_split
+from torch.utils.data import Dataloader, TensorDataset, random_split
 import Types
 
 sequenceMapping = {
@@ -110,24 +110,81 @@ def loadFeaturesFromPt(path: str) -> TensorDataset:
 
     return TensorDataset(xOnehot, maskOnehot, xEmbed, maskEmbed, y)
 
-def shuffleSPlitTDataset(
+def toDataloaders(
         dataset: TensorDataset,
         trainSplit: float,
         validationSplit: float,
         testSplit: float,
+        trainBatchSize: int,
+        valBatchSize: int,
+        testBatchSize: int,
         seed: int
     ):
 
     """
     Function that takes a TensorDataset as argument, shuffles the dataset
-    then splits it into training, validation and testing.
+    then splits it into training, validation and testing DataLoaders.
     """
 
     n = len(dataset)
     gen = torch.Generator().manual_seed(seed)
-    train, validation, test = random_split(dataset, [trainSplit * n, validationSplit * n, testSplit * n], generator=gen)
+    trainDs, validationDs, testDs = random_split(dataset, [trainSplit * n, validationSplit * n, testSplit * n], generator=gen)
+    
+    train = DataLoader(
+        trainDs,
+        batch_size=trainBatchSize,
+        shuffle=True,
+        num_workers=0,
+        pin_memory=False,
+        drop_last=False
+    )
+
+    validation = DataLoader(
+        validationDs,
+        batch_size=valBatchSize,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=False
+    )
+
+    test = DataLoader(
+        testDs,
+        batch_size=testBatchSize,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=False
+    )
+
+
+
     return train, validation, test
 
+def printDataloader(name: str, dataL: Dataloader) -> None:
+
+    print(f"Print 3 rows for {name} DataLoader with shape: {dataL.shape}")
+
+    try:
+        batch = next(iter(dataL))
+        xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+
+        table = []
+
+        for i in range(3):
+            
+            table.append({
+                "index": i,
+                "onehot": xOnehot[i],
+                "maskOnehot": maskOnehot[i],
+                "embeddings": xEmbed[i],
+                "maskEmbedings": maskEmbed[i],
+                "labels": y[i]
+            })
+
+        df = pd.DataFrame(table)
+        print(df)
+
+    except StopIteration:
+        raise ValueError("Empty DataLoader was given")
 
 def loadDatasetPercentage(datasetPath: str, percentage: int)-> DatasetDict:
     

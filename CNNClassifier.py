@@ -3,6 +3,7 @@ import torch,os,random
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+from datasets import load_dataset, DatasetDict, Dataset
 
 class ConvolutionBlock(nn.Module):
     """
@@ -362,7 +363,13 @@ class SmORFCNN(nn.Module):
         classifierOutput: int                   = Types.DEFAULT_SMORFCNN_CLASSIFIER_OUTPUT,
         seed: int                               = Types.DEFAULT_SMORFCNN_SEED,
         deterministic: bool                     = Types.DEFAULT_SMORFCNN_DETERMINISTIC,
-        device: str                             = Types.DEFAULT_SMORFCNN_DEVICE
+        device: str                             = Types.DEFAULT_SMORFCNN_DEVICE,
+        trainBatchSize: int                     = Types.DEFAULT_SMORFCNN_TRAIN_BATCH_SIZE,
+        valBatchSize: int                       = Types.DEFAULT_SMORFCNN_VALIDATION_BATCH_SIZE,
+        testBatchSize: int                      = Types.DEFAULT_SMORFCNN_TEST_BATCH_SIZE,
+        trainSplit: float                       = Types.DEFAULT_SMORFCNN_TRAIN_SPLIT,
+        valSplit: float                         = Types.DEFAULT_SMORFCNN_VALIDATION_SPLIT,
+        testSplit: float                        = Types.DEFAULT_SMORFCNN_TEST_SPLIT
     ):
         super().__init__()
 
@@ -402,6 +409,12 @@ class SmORFCNN(nn.Module):
         self.dropout = dropout
         self.classes = classes
         self.classifierOutput = classifierOutput
+        self.trainBatchSize = trainBatchSize
+        self.validationBatchSize = valBatchSize
+        self.testBatchSize = testBatchSize
+        self.trainSplit = trainSplit
+        self.validationSplit = valSplit
+        self.testSplit = testSplit
 
         self.onehotMultiKernelClass = None
         self.onehotTemporalClass = None
@@ -449,14 +462,27 @@ class SmORFCNN(nn.Module):
             nn.Linear(self.classifierOutput, self.classes)
         )
 
-        dataset = Helpers.Dataset(self.featuresPath)
-        self.trainDataset, self.validationDataset, self.testDataset = Helpers.shuffleSPlitTDataset(
+        self.trainDataLoader = None
+        self.validationDataLoader = None
+        self.testDataLoader = None
+
+    def initializeDataset(self) -> None:
+
+        dataset = Dataset(self.featuresPath)
+
+        self.trainDataLoader, self.validationDataLoader, self.testDataLoader = Helpers.toDataloaders(
             dataset,
-            Types.DEFAULT_SMORFCNN_TRAIN_SPLIT,
-            Types.DEFAULT_SMORFCNN_VALIDATION_SPLIT,
-            Types.DEFAULT_SMORFCNN_TEST_SPLIT,
-            Types.DEFAULT_SMORFCNN_SEED
+            self.trainSplit,
+            self.validationSplit,
+            self.testSplit,
+            self.trainBatchSize,
+            self.validationBatchSize,
+            self.testBatchSize
         )
+
+        Helpers.printDataloader(self.trainDataLoader)
+        Helpers.printDataloader(self.validationDataLoader)
+        Helpers.printDataloader(self.testDataLoader)
 
     def _calculateFusedDim(self) -> int:
 
@@ -547,7 +573,6 @@ class SmORFCNN(nn.Module):
 
     def trainEpoch(
             self,
-            data,
             optimizer: torch.optim.Optimizer,
             maxGradNorm: float      = Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
             threshold: float        = Types.DEFAULT_SMORFCNN_THRESHOLD
@@ -565,6 +590,8 @@ class SmORFCNN(nn.Module):
         all_targets = []
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
+
+        
 
         return
 
