@@ -1,6 +1,7 @@
 import torch
 from pathlib import Path
 import pandas as pd
+import numpy as np
 from datasets import load_dataset, DatasetDict, Dataset
 from torch.utils.data import Dataloader, TensorDataset, random_split
 import Types
@@ -155,8 +156,6 @@ def toDataloaders(
         pin_memory=False
     )
 
-
-
     return train, validation, test
 
 def printDataloader(name: str, dataL: Dataloader) -> None:
@@ -291,3 +290,88 @@ def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return globalAverage
 
 ########## ----------- End --------- ##########
+
+def computeEpochMetrics(
+    probabillities: torch.Tensor,
+    targets: torch.Tensor,
+    runningLoss: float,
+    n: int,
+    threshold: float,
+    epochIndex: int
+) -> dict:
+    """
+    Compute epoch-level metrics and convert runningLoss to sample epoch loss.\n
+    Returns: {'loss','acc','precision','recall','f1','TP','TN','FP','FN'}\n
+    """
+
+    # Flatten & types
+    probabillities = probabillities.view(-1)
+    targets = targets.view(-1).to(dtype=torch.long)
+
+    # Threshold → predictions
+    yPred = (probabillities >= threshold)
+    positive = (targets == 1)
+    negative = (targets == 0)
+
+    #Calculating TP, TN, FP, FN
+    truePositive = (yPred & positive).sum().item()
+    falsePositive = (yPred & negative).sum().item()
+    falseNegative = ((~yPred) & positive).sum().item()
+    trueNegative = ((~yPred) & negative).sum().item()
+
+    total = truePositive + trueNegative + falsePositive + falseNegative
+
+    accuraccy = (truePositive + trueNegative) / total
+    precision = truePositive / truePositive + falsePositive
+    recall = truePositive / truePositive + falseNegative
+    f1 = 2 * precision * recall / precision + recall
+
+    epochLoss = runningLoss / n
+
+    metrics = {
+        "loss": epochLoss,
+        "acc": accuraccy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "TP": truePositive,
+        "TN": trueNegative,
+        "FP": falsePositive,
+        "FN": falseNegative,
+    }
+
+    printEpochMetrics(metrics, epochIndex)
+
+    return metrics
+
+def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
+    df = pd.DataFrame(metrics)
+    print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
+    print(df)
+
+def computeEpochROC(
+    probabillities: torch.Tensor,
+    targets: torch.Tensor,
+    epochIndex: int
+) -> dict:
+
+    probabillities = probabillities.detach().cpu().numpy().astype(np.float64)
+    targets = targets.detach().cpu().numpy().astype(np.int32)
+    # sort by descending score
+    order = np.argsort(-probabillities)
+    sorted = targets[order]
+    P = int((sorted == 1).sum())
+    N = int((sorted == 0).sum())
+    if P > 0 and N > 0:
+        tps = np.cumsum(sorted == 1)
+        fps = np.cumsum(sorted == 0)
+        tpr = tps / P
+        fpr = fps / N
+        # add (0,0) and (1,1)
+        fpr = np.concatenate([[0.0], fpr, [1.0]])
+        tpr = np.concatenate([[0.0], tpr, [1.0]])
+        rocAuc = float(np.trapz(tpr, fpr))
+    else:
+        rocAuc = float("nan")  # degenerate label set
+    
+    return rocAuc

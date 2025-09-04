@@ -1,5 +1,6 @@
 import Types, Helpers
 import torch,os,random
+from tqdm import tqdm
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
@@ -573,6 +574,8 @@ class SmORFCNN(nn.Module):
 
     def trainEpoch(
             self,
+            trainingData: DataLoader,
+            epochIndex: int,
             optimizer: torch.optim.Optimizer,
             maxGradNorm: float      = Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
             threshold: float        = Types.DEFAULT_SMORFCNN_THRESHOLD
@@ -581,22 +584,140 @@ class SmORFCNN(nn.Module):
         """
         Trainer function
         """
-
         self.train()
 
-        loss = 0.0
         n = 0
-        all_probs = []
-        all_targets = []
+        runningLoss = 0.0
+        probabillities = []
+        targets = []
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
 
-        
+        print(f"Starting training for epoch {epochIndex}")
 
-        return
+        try:
+            iterator = tqdm(
+                    enumerate(trainingData),
+                    total=len(trainingData),
+                    desc=f"Epoch {epochIndex}",
+                    leave=False
+                )
+        except Exception:
+            iterator = enumerate(trainingData)
 
-    def validateEpoch():
-        return
+        for i, batch in iterator:
+
+            xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            xOnehot = xOnehot.to(self.device)
+            maskOnehot = maskOnehot.to(self.device)
+            xEmbed = xEmbed.to(self.device)
+            maskEmbed = maskEmbed.to(self.device)
+            y = y.to(self.device)
+
+            optimizer.zero_grad()
+
+            outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
+
+            lossFunction(outputs, y.float())
+            probs = torch.sigmoid(outputs)
+            lossFunction.backward()
+
+            torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
+
+            optimizer.step()
+
+            batchSize = y.size(0)
+            n += batchSize
+            runningLoss += lossFunction.item() * batchSize
+            probabillities.append(probs.detach())
+            targets.append(y.detach())
+
+            if 'tqdm' in locals():
+                iterator.set_postfix(loss=runningLoss / n)
+
+        probabillities = torch.cat(probabillities, dim=0)
+        targets = torch.cat(targets, dim=0)
+
+        return Helpers.computeEpochMetrics(
+            probabillities,
+            targets,
+            runningLoss,
+            n,
+            threshold,
+            epochIndex
+        )
+    @torch.no_grad()
+    def validateEpoch(
+            self,
+            validationData: DataLoader,
+            epochIndex: int,
+            threshold: float = Types.DEFAULT_SMORFCNN_THRESHOLD,
+        ) -> dict:
+
+        self.eval()
+
+        n = 0
+        runningLoss = 0.0
+        probabillities = []
+        targets = []
+
+        lossFunction = torch.nn.BCEWithLogitsLoss()
+
+        print(f"Starting training for epoch {epochIndex}")
+
+        try:
+            iterator = tqdm(
+                    enumerate(validationData),
+                    total=len(validationData),
+                    desc=f"Epoch {epochIndex}",
+                    leave=False
+                )
+        except Exception:
+            iterator = enumerate(validationData)
+
+        for i, batch in iterator:
+
+            xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            xOnehot = xOnehot.to(self.device)
+            maskOnehot = maskOnehot.to(self.device)
+            xEmbed = xEmbed.to(self.device)
+            maskEmbed = maskEmbed.to(self.device)
+            y = y.to(self.device)
+
+            outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
+
+            lossFunction(outputs, y.float())
+            probs = torch.sigmoid(outputs)
+
+            batchSize = y.size(0)
+            n += batchSize
+            runningLoss += lossFunction.item() * batchSize
+            probabillities.append(probs.detach())
+            targets.append(y.detach())
+
+            if 'tqdm' in locals():
+                iterator.set_postfix(loss=runningLoss / n)
+
+        probabillities = torch.cat(probabillities, dim=0)
+        targets = torch.cat(targets, dim=0)
+
+        metrics = Helpers.computeEpochMetrics(
+            probabillities,
+            targets,
+            runningLoss,
+            n,
+            threshold,
+            epochIndex
+        )
+
+        metrics["rocAuc"] = Helpers.computeEpochROC(
+            probabillities,
+            targets,
+            epochIndex
+        )
+
+        return metrics
+
     def fit():
         return
     def kFoldCrossValidation():

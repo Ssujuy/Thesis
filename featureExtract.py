@@ -94,6 +94,7 @@ def featureExtraction(
         "embedding_dim": int(embedTensor.shape[1]),
         "num_samples": len(sequences),
     }
+
     Helpers.saveFeaturesPtFile(
         saveFeaturesPath,
         sequences,
