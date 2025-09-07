@@ -292,7 +292,7 @@ def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 ########## ----------- End --------- ##########
 
 def computeEpochMetrics(
-    probabillities: torch.Tensor,
+    probabilities: torch.Tensor,
     targets: torch.Tensor,
     runningLoss: float,
     n: int,
@@ -305,11 +305,11 @@ def computeEpochMetrics(
     """
 
     # Flatten & types
-    probabillities = probabillities.view(-1)
+    probabilities = probabilities.view(-1)
     targets = targets.view(-1).to(dtype=torch.long)
 
     # Threshold → predictions
-    yPred = (probabillities >= threshold)
+    yPred = (probabilities >= threshold)
     positive = (targets == 1)
     negative = (targets == 0)
 
@@ -344,34 +344,41 @@ def computeEpochMetrics(
 
     return metrics
 
+def computeEpochROC(
+    probabilities: torch.Tensor,
+    targets: torch.Tensor,
+    epochIndex: int
+) -> dict:
+
+    probabilities = probabilities.detach().cpu().numpy().astype(np.float64)
+    targets = targets.detach().cpu().numpy().astype(np.int32)
+    # sort by descending score
+    order = np.argsort(-probabilities)
+    sorted = targets[order]
+    positives = (sorted == 1).sum()
+    negatives = (sorted == 0).sum()
+
+    truePositive = int(np.cumsum(sorted == 1))
+    falsePositive = int(np.cumsum(sorted == 0))
+    truePositive = truePositive / positives
+    falsePositiveRatio = falsePositive / negatives
+    # add (0,0) and (1,1)
+    falsePositiveRatio = np.concatenate([[0.0], falsePositiveRatio, [1.0]])
+    truePositive = np.concatenate([[0.0], truePositive, [1.0]])
+    auc = float(np.trapz(truePositive, falsePositiveRatio))
+    
+    aucDict = {"auc": auc, "fpr": falsePositiveRatio, "tpr": truePositive}
+
+    printEpochAUC(aucDict, epochIndex)
+
+    return aucDict
+
 def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     df = pd.DataFrame(metrics)
     print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
     print(df)
 
-def computeEpochROC(
-    probabillities: torch.Tensor,
-    targets: torch.Tensor,
-    epochIndex: int
-) -> dict:
-
-    probabillities = probabillities.detach().cpu().numpy().astype(np.float64)
-    targets = targets.detach().cpu().numpy().astype(np.int32)
-    # sort by descending score
-    order = np.argsort(-probabillities)
-    sorted = targets[order]
-    P = int((sorted == 1).sum())
-    N = int((sorted == 0).sum())
-    if P > 0 and N > 0:
-        tps = np.cumsum(sorted == 1)
-        fps = np.cumsum(sorted == 0)
-        tpr = tps / P
-        fpr = fps / N
-        # add (0,0) and (1,1)
-        fpr = np.concatenate([[0.0], fpr, [1.0]])
-        tpr = np.concatenate([[0.0], tpr, [1.0]])
-        rocAuc = float(np.trapz(tpr, fpr))
-    else:
-        rocAuc = float("nan")  # degenerate label set
-    
-    return rocAuc
+def printEpochAUC(auc: dict, epochIndex: int) -> None:
+    df = pd.DataFrame(auc)
+    print(f"Epoch {epochIndex} AUC , False Positive Ratio and False Negative Ratio")
+    print(df)

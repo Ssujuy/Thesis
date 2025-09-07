@@ -588,7 +588,7 @@ class SmORFCNN(nn.Module):
 
         n = 0
         runningLoss = 0.0
-        probabillities = []
+        probabilities = []
         targets = []
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
@@ -629,17 +629,17 @@ class SmORFCNN(nn.Module):
             batchSize = y.size(0)
             n += batchSize
             runningLoss += lossFunction.item() * batchSize
-            probabillities.append(probs.detach())
+            probabilities.append(probs.detach())
             targets.append(y.detach())
 
             if 'tqdm' in locals():
                 iterator.set_postfix(loss=runningLoss / n)
 
-        probabillities = torch.cat(probabillities, dim=0)
+        probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
 
         return Helpers.computeEpochMetrics(
-            probabillities,
+            probabilities,
             targets,
             runningLoss,
             n,
@@ -658,7 +658,7 @@ class SmORFCNN(nn.Module):
 
         n = 0
         runningLoss = 0.0
-        probabillities = []
+        probabilities = []
         targets = []
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
@@ -692,17 +692,17 @@ class SmORFCNN(nn.Module):
             batchSize = y.size(0)
             n += batchSize
             runningLoss += lossFunction.item() * batchSize
-            probabillities.append(probs.detach())
+            probabilities.append(probs.detach())
             targets.append(y.detach())
 
             if 'tqdm' in locals():
                 iterator.set_postfix(loss=runningLoss / n)
 
-        probabillities = torch.cat(probabillities, dim=0)
+        probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
 
         metrics = Helpers.computeEpochMetrics(
-            probabillities,
+            probabilities,
             targets,
             runningLoss,
             n,
@@ -710,16 +710,141 @@ class SmORFCNN(nn.Module):
             epochIndex
         )
 
-        metrics["rocAuc"] = Helpers.computeEpochROC(
-            probabillities,
+        metrics = metrics | Helpers.computeEpochROC(
+            probabilities,
             targets,
             epochIndex
         )
 
         return metrics
 
-    def fit():
-        return
+    def fit(
+        self,
+        epochs:      int,
+        optimizer:   torch.optim.Optimizer,
+        scheduler:   torch.optim.lr_scheduler._LRScheduler | None = None,
+        threshold:   float = Types.DEFAULT_SMORFCNN_THRESHOLD,
+        verbose:     bool  = True,
+    ):
+        """
+        Train the model for `epochs` using train/val loaders and return a training history dict.
+        Keeps the best (val F1) checkpoint loaded at the end.
+        History keys:
+        - train_loss, val_loss
+        - train_acc,  val_acc
+        - train_precision, val_precision
+        - train_recall,    val_recall
+        - train_f1,        val_f1
+        - val_roc_auc
+        - lr  (the learning rate each epoch, if scheduler/optimizer exposes it)
+        """
+        # Ensure model weights live on the intended device before first forward
+        self.to(self.device)
+
+        # Where we’ll store epoch-by-epoch curves
+        history = {
+            "train_loss": [], "val_loss": [],
+            "train_acc":  [], "val_acc":  [],
+            "train_precision": [], "val_precision": [],
+            "train_recall":    [], "val_recall":    [],
+            "train_f1":    [], "val_f1":    [],
+            "val_roc_auc": [],
+            "lr": []
+        }
+
+        best_f1 = -1.0
+        best_state: dict[str, torch.Tensor] | None = None
+
+        # Optional outer progress bar over epochs
+        try:
+            from tqdm import trange
+            epoch_iter = trange(1, epochs + 1, desc="Training", leave=True)
+        except Exception:
+            epoch_iter = range(1, epochs + 1)
+
+        for epoch_idx in epoch_iter:
+            # ---- 1) One full training epoch (model.train() inside trainEpoch) ----
+            train_metrics = self.trainEpoch(
+                trainingData=trainLoader,
+                epochIndex=epoch_idx,
+                optimizer=optimizer,
+                maxGradNorm=Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
+                threshold=threshold,
+            )
+
+            # ---- 2) One full validation epoch (model.eval() + no_grad inside) ----
+            val_metrics = self.validateEpoch(
+                validationData=valLoader,
+                epochIndex=epoch_idx,
+                threshold=threshold,
+            )
+
+            # ---- 3) (Optional) scheduler step — typically once per epoch ----
+            if scheduler is not None:
+                # Many schedulers expect .step() AFTER val metrics (e.g., ReduceLROnPlateau uses val loss)
+                # If you use ReduceLROnPlateau, call as: scheduler.step(val_metrics["loss"])
+                try:
+                    # smart default: if ReduceLROnPlateau, step with val loss
+                    import torch.optim.lr_scheduler as lrs
+                    if isinstance(scheduler, lrs.ReduceLROnPlateau):
+                        scheduler.step(val_metrics["loss"])
+                    else:
+                        scheduler.step()
+                except Exception:
+                    # Fallback if the scheduler doesn't match
+                    scheduler.step()
+
+            # ---- 4) Record history ----
+            history["train_loss"].append(train_metrics["loss"])
+            history["val_loss"].append(val_metrics["loss"])
+            history["train_acc"].append(train_metrics["acc"])
+            history["val_acc"].append(val_metrics["acc"])
+            history["train_precision"].append(train_metrics["precision"])
+            history["val_precision"].append(val_metrics["precision"])
+            history["train_recall"].append(train_metrics["recall"])
+            history["val_recall"].append(val_metrics["recall"])
+            history["train_f1"].append(train_metrics["f1"])
+            history["val_f1"].append(val_metrics["f1"])
+            history["val_roc_auc"].append(val_metrics.get("roc_auc", float("nan")))
+
+            # Track LR (first param group)
+            try:
+                current_lr = optimizer.param_groups[0]["lr"]
+            except Exception:
+                current_lr = float("nan")
+            history["lr"].append(current_lr)
+
+            # ---- 5) Save best-by-val-F1 weights ----
+            if val_metrics["f1"] > best_f1:
+                best_f1 = val_metrics["f1"]
+                # Keep a CPU copy; avoids GPU memory bloat and is device-agnostic to reload
+                best_state = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
+
+            # ---- 6) Human-readable log line ----
+            if verbose:
+                log = (
+                    f"[{epoch_idx:03d}/{epochs}] "
+                    f"train: loss={train_metrics['loss']:.4f}, acc={train_metrics['acc']:.4f}, "
+                    f"P={train_metrics['precision']:.4f}, R={train_metrics['recall']:.4f}, F1={train_metrics['f1']:.4f} | "
+                    f"val: loss={val_metrics['loss']:.4f}, acc={val_metrics['acc']:.4f}, "
+                    f"P={val_metrics['precision']:.4f}, R={val_metrics['recall']:.4f}, F1={val_metrics['f1']:.4f}, "
+                    f"AUC={val_metrics.get('roc_auc', float('nan')):.4f} | lr={current_lr:.2e}"
+                )
+                # If tqdm is active, write via the bar; else, print
+                try:
+                    epoch_iter.set_postfix_str(f"F1 {val_metrics['f1']:.4f}, AUC {val_metrics.get('roc_auc', float('nan')):.4f}")
+                    epoch_iter.write(log)
+                except Exception:
+                    print(log)
+
+        # ---- 7) Restore the best checkpoint (by val F1) ----
+        if best_state is not None:
+            self.load_state_dict(best_state)
+            # Ensure back on the target device (weights were stored on CPU)
+            self.to(self.device)
+
+        return history
+
     def kFoldCrossValidation():
         return
     def saveModel() -> None:
