@@ -4,6 +4,8 @@ from tqdm import tqdm
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim.lr_scheduler as lrScheduler
+from torch.utils.data import DataLoader
 from datasets import load_dataset, DatasetDict, Dataset
 
 class ConvolutionBlock(nn.Module):
@@ -665,15 +667,12 @@ class SmORFCNN(nn.Module):
 
         print(f"Starting training for epoch {epochIndex}")
 
-        try:
-            iterator = tqdm(
-                    enumerate(validationData),
-                    total=len(validationData),
-                    desc=f"Epoch {epochIndex}",
-                    leave=False
-                )
-        except Exception:
-            iterator = enumerate(validationData)
+        iterator = tqdm(
+                enumerate(validationData),
+                total=len(validationData),
+                desc=f"Epoch {epochIndex}",
+                leave=False
+            )
 
         for i, batch in iterator:
 
@@ -723,8 +722,6 @@ class SmORFCNN(nn.Module):
         epochs:      int,
         optimizer:   torch.optim.Optimizer,
         scheduler:   torch.optim.lr_scheduler._LRScheduler | None = None,
-        threshold:   float = Types.DEFAULT_SMORFCNN_THRESHOLD,
-        verbose:     bool  = True,
     ):
         """
         Train the model for `epochs` using train/val loaders and return a training history dict.
@@ -738,114 +735,117 @@ class SmORFCNN(nn.Module):
         - val_roc_auc
         - lr  (the learning rate each epoch, if scheduler/optimizer exposes it)
         """
-        # Ensure model weights live on the intended device before first forward
         self.to(self.device)
 
-        # Where we’ll store epoch-by-epoch curves
-        history = {
-            "train_loss": [], "val_loss": [],
-            "train_acc":  [], "val_acc":  [],
-            "train_precision": [], "val_precision": [],
-            "train_recall":    [], "val_recall":    [],
-            "train_f1":    [], "val_f1":    [],
-            "val_roc_auc": [],
-            "lr": []
+        bestF1 = -1.0
+        bestState: dict[str, torch.Tensor] | None = None
+
+        trainingMetrics = {
+            "loss": [],
+            "acc": [],
+            "precision": [],
+            "recall": [],
+            "f1": [],
+            "TP": [],
+            "TN": [],
+            "FP": [],
+            "FN": [],
         }
 
-        best_f1 = -1.0
-        best_state: dict[str, torch.Tensor] | None = None
+        validationMetrics = {
+            "loss": [],
+            "acc": [],
+            "precision": [],
+            "recall": [],
+            "learningRate": [],
+            "f1": [],
+            "TP": [],
+            "TN": [],
+            "FP": [],
+            "FN": [],
+            "auc": [],
+            "fpr": [],
+            "tpr": []
+        }
 
-        # Optional outer progress bar over epochs
-        try:
-            from tqdm import trange
-            epoch_iter = trange(1, epochs + 1, desc="Training", leave=True)
-        except Exception:
-            epoch_iter = range(1, epochs + 1)
+        epochIter = tqdm(
+            enumerate(range(1, epochs + 1), start=1),
+            total=epochs,
+            desc="Epochs",
+            leave=True
+        )
 
-        for epoch_idx in epoch_iter:
-            # ---- 1) One full training epoch (model.train() inside trainEpoch) ----
-            train_metrics = self.trainEpoch(
-                trainingData=trainLoader,
-                epochIndex=epoch_idx,
+        for epoch in epochIter:
+
+            epochTrainMetrics = self.trainEpoch(
+                trainingData=self.trainDataLoader,
+                epochIndex=epoch,
                 optimizer=optimizer,
                 maxGradNorm=Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
-                threshold=threshold,
+                threshold=self.threshold,
             )
 
-            # ---- 2) One full validation epoch (model.eval() + no_grad inside) ----
-            val_metrics = self.validateEpoch(
-                validationData=valLoader,
-                epochIndex=epoch_idx,
-                threshold=threshold,
+            epochValMetrics = self.validateEpoch(
+                validationData=self.validationDataLoader,
+                epochIndex=epoch,
+                threshold=self.threshold,
             )
 
             # ---- 3) (Optional) scheduler step — typically once per epoch ----
-            if scheduler is not None:
                 # Many schedulers expect .step() AFTER val metrics (e.g., ReduceLROnPlateau uses val loss)
                 # If you use ReduceLROnPlateau, call as: scheduler.step(val_metrics["loss"])
-                try:
-                    # smart default: if ReduceLROnPlateau, step with val loss
-                    import torch.optim.lr_scheduler as lrs
-                    if isinstance(scheduler, lrs.ReduceLROnPlateau):
-                        scheduler.step(val_metrics["loss"])
-                    else:
-                        scheduler.step()
-                except Exception:
-                    # Fallback if the scheduler doesn't match
-                    scheduler.step()
 
-            # ---- 4) Record history ----
-            history["train_loss"].append(train_metrics["loss"])
-            history["val_loss"].append(val_metrics["loss"])
-            history["train_acc"].append(train_metrics["acc"])
-            history["val_acc"].append(val_metrics["acc"])
-            history["train_precision"].append(train_metrics["precision"])
-            history["val_precision"].append(val_metrics["precision"])
-            history["train_recall"].append(train_metrics["recall"])
-            history["val_recall"].append(val_metrics["recall"])
-            history["train_f1"].append(train_metrics["f1"])
-            history["val_f1"].append(val_metrics["f1"])
-            history["val_roc_auc"].append(val_metrics.get("roc_auc", float("nan")))
+            if isinstance(scheduler, lrScheduler.ReduceLROnPlateau):
+                scheduler.step(validationMetrics["loss"])
+            else:
+                scheduler.step()
 
-            # Track LR (first param group)
-            try:
-                current_lr = optimizer.param_groups[0]["lr"]
-            except Exception:
-                current_lr = float("nan")
-            history["lr"].append(current_lr)
+            for key in epochTrainMetrics:
+                trainingMetrics[key].append(epochTrainMetrics[key])
+
+            for key in validationMetrics:
+                validationMetrics[key].append(epochValMetrics[key])
+
+            epochLR = optimizer.param_groups[0]["lr"]
+            validationMetrics["learningRate"].append(epochLR)
 
             # ---- 5) Save best-by-val-F1 weights ----
-            if val_metrics["f1"] > best_f1:
-                best_f1 = val_metrics["f1"]
+            if validationMetrics["f1"] > bestF1:
+                bestF1 = validationMetrics["f1"]
                 # Keep a CPU copy; avoids GPU memory bloat and is device-agnostic to reload
-                best_state = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
+                bestState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
 
-            # ---- 6) Human-readable log line ----
-            if verbose:
-                log = (
-                    f"[{epoch_idx:03d}/{epochs}] "
-                    f"train: loss={train_metrics['loss']:.4f}, acc={train_metrics['acc']:.4f}, "
-                    f"P={train_metrics['precision']:.4f}, R={train_metrics['recall']:.4f}, F1={train_metrics['f1']:.4f} | "
-                    f"val: loss={val_metrics['loss']:.4f}, acc={val_metrics['acc']:.4f}, "
-                    f"P={val_metrics['precision']:.4f}, R={val_metrics['recall']:.4f}, F1={val_metrics['f1']:.4f}, "
-                    f"AUC={val_metrics.get('roc_auc', float('nan')):.4f} | lr={current_lr:.2e}"
+            try:
+                epochIter.set_postfix_str(
+                    f"F1 {validationMetrics['f1']:.4f}, AUC {validationMetrics.get('roc_auc', float('nan')):.4f}, LR {epochLR:.2e}"
                 )
-                # If tqdm is active, write via the bar; else, print
-                try:
-                    epoch_iter.set_postfix_str(f"F1 {val_metrics['f1']:.4f}, AUC {val_metrics.get('roc_auc', float('nan')):.4f}")
-                    epoch_iter.write(log)
-                except Exception:
-                    print(log)
+            except Exception:
+                pass
 
         # ---- 7) Restore the best checkpoint (by val F1) ----
-        if best_state is not None:
-            self.load_state_dict(best_state)
-            # Ensure back on the target device (weights were stored on CPU)
+        if bestState is not None:
+            self.load_state_dict(bestState)
             self.to(self.device)
 
-        return history
+        Helpers.printFitSummary(trainingMetrics, validationMetrics)
 
-    def kFoldCrossValidation():
+        return trainingMetrics, validationMetrics
+
+    def kFoldCrossValidation(
+        self,
+        k: int = Types.DEFAULT_SMORFCNN_KFOLD,
+    ):
+        """
+        """
+        
+        try:
+            fold_iter = tqdm(enumerate(splits, start=1), total=k, desc="K-Fold CV", leave=True)
+        except Exception:
+            fold_iter = enumerate(splits, start=1)
+
+        for fold_idx, (train_idx, val_idx) in fold_iter:
+            if verbose:
+                print(f"\n=== Fold {fold_idx}/{k} | train={len(train_idx)}  val={len(val_idx)} ===")
         return
     def saveModel() -> None:
         return

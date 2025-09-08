@@ -382,3 +382,22 @@ def printEpochAUC(auc: dict, epochIndex: int) -> None:
     df = pd.DataFrame(auc)
     print(f"Epoch {epochIndex} AUC , False Positive Ratio and False Negative Ratio")
     print(df)
+
+
+
+def printFitSummary(
+        trainingMetrics: dict,
+        validationMetrics: dict
+    ) -> None:
+        
+        tMetricsDf  =  pd.DataFrame({
+            trainingMetrics
+        })
+
+        vMetricsDf = pd.DataFrame({
+            validationMetrics
+        })
+
+        print("----------########## Summary of Metrics computed during Fit ##########----------")
+        print(tMetricsDf)
+        print(vMetricsDf)

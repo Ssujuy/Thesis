@@ -77,6 +77,7 @@ DEFAULT_SMORFCNN_WEIGHT_DECAY:               float       = 1e-4
 DEFAULT_SMORFCNN_TRAIN_BATCH_SIZE:           int         = 16
 DEFAULT_SMORFCNN_VALIDATION_BATCH_SIZE:      int         = 16
 DEFAULT_SMORFCNN_TEST_BATCH_SIZE:            int         = 16
+DEFAULT_SMORFCNN_KFOLD:                      int         = 10
 ### end
 
 activationFunctionMapping = {
