@@ -373,6 +373,41 @@ def computeEpochROC(
 
     return aucDict
 
+def computePR(
+    probabilities: torch.Tensor,
+    targets: torch.Tensor,
+    epochIndex: int
+)-> dict:
+    
+    probabilities = probabilities.detach().cpu().view(-1).numpy()
+    targets = targets.detach().cpu().view(-1).numpy().astype(np.int32)
+
+    positives = (targets == 1).sum()
+    negatives = (targets == 0).sum()
+
+    #     # Raw precision/recall at each distinct score step
+    # precision = tp / np.maximum(tp + fp, 1.0)
+    # recall    = tp / P
+
+    # # Keep thresholds aligned with raw points (useful for plotting/inspection)
+    # thresholds = s
+
+    # # ---- interpolate precision (monotone envelope) ----
+    # # Make precision non-increasing w.r.t recall (right-to-left max)
+    # # This matches the "interpolated precision" used in AP definitions.
+    # precision_envelope = np.maximum.accumulate(precision[::-1])[::-1]
+
+    # # ---- step-wise AP (VOC/sklearn-style) ----
+    # # Insert sentinel endpoints
+    # mrec = np.concatenate(([0.0], recall, [1.0]))
+    # mpre = np.concatenate(([1.0], precision_envelope, [0.0]))
+    # # Enforce envelope again across sentinels (safety)
+    # for i in range(mpre.size - 1, 0, -1):
+    #     mpre[i-1] = max(mpre[i-1], mpre[i])
+    # # Sum area of horizontal steps where recall increases
+    # idx = np.where(mrec[1:] != mrec[:-1])[0]
+    # ap = float(np.sum((mrec[idx+1] - mrec[idx]) * mpre[idx+1]))
+
 def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     df = pd.DataFrame(metrics)
     print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
@@ -382,8 +417,6 @@ def printEpochAUC(auc: dict, epochIndex: int) -> None:
     df = pd.DataFrame(auc)
     print(f"Epoch {epochIndex} AUC , False Positive Ratio and False Negative Ratio")
     print(df)
-
-
 
 def printFitSummary(
         trainingMetrics: dict,
@@ -401,3 +434,48 @@ def printFitSummary(
         print("----------########## Summary of Metrics computed during Fit ##########----------")
         print(tMetricsDf)
         print(vMetricsDf)
+
+def kFoldSummary(foldMetrics: list) -> dict:
+    """
+    fold_metrics_list: list of dicts, each with keys:
+      loss, acc, precision, recall, learningRate, f1, TP, TN, FP, FN, auc, fpr, tpr
+    Returns a 'summary' dict with mean/std for scalar metrics and sums for counts.
+    """
+    meanKeys = ["loss", "acc", "precision", "recall", "f1", "auc", "learningRate"]
+    sumKeys = ["TP", "TN", "FP", "FN"]
+
+    summary = {}
+
+    # --- mean/std over folds for scalar metrics ---
+    for key in meanKeys:
+        values = []
+        for fold in foldMetrics:
+            value = float(v)
+            values.append(v)
+
+        summary[f"{key}Mean"] = float(np.nanmean(np.array(values, dtype=float)))
+        summary[f"{key}Std"]  = float(np.nanstd(np.array(values, dtype=float)))
+
+    for key in sumKeys:
+        total = 0
+        for fold in foldMetrics:
+            value = fold.get(key, 0)
+            total += int(value)
+
+        summary[f"Total{key}"] = int(total)
+
+    return summary
+
+def printKFoldMetrics(
+    foldMetrics: list,
+    foldMetricsSummary: dict
+)-> None:
+    
+
+    df = pd.DataFrame(foldMetrics)
+    print("\nPer-fold validation metrics:")
+    print(df)
+
+    print("\n10-Fold summary (mean ± std and sums):")
+    df = pd.DataFrame(foldMetricsSummary)
+    print(df)

@@ -5,8 +5,10 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim.lr_scheduler as lrScheduler
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset, Subset
 from datasets import load_dataset, DatasetDict, Dataset
+from sklearn.model_selection import StratifiedKFold
+
 
 class ConvolutionBlock(nn.Module):
     """
@@ -364,6 +366,7 @@ class SmORFCNN(nn.Module):
         dropout: float                          = Types.DEFAULT_SMORFCNN_DROPOUT,
         classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
         classifierOutput: int                   = Types.DEFAULT_SMORFCNN_CLASSIFIER_OUTPUT,
+        threshold: float                        = Types.DEFAULT_SMORFCNN_THRESHOLD,
         seed: int                               = Types.DEFAULT_SMORFCNN_SEED,
         deterministic: bool                     = Types.DEFAULT_SMORFCNN_DETERMINISTIC,
         device: str                             = Types.DEFAULT_SMORFCNN_DEVICE,
@@ -372,7 +375,9 @@ class SmORFCNN(nn.Module):
         testBatchSize: int                      = Types.DEFAULT_SMORFCNN_TEST_BATCH_SIZE,
         trainSplit: float                       = Types.DEFAULT_SMORFCNN_TRAIN_SPLIT,
         valSplit: float                         = Types.DEFAULT_SMORFCNN_VALIDATION_SPLIT,
-        testSplit: float                        = Types.DEFAULT_SMORFCNN_TEST_SPLIT
+        testSplit: float                        = Types.DEFAULT_SMORFCNN_TEST_SPLIT,
+        epochs: int                             = Types.DEFAULT_SMORFCNN_EPOCHS,
+
     ):
         super().__init__()
 
@@ -412,12 +417,14 @@ class SmORFCNN(nn.Module):
         self.dropout = dropout
         self.classes = classes
         self.classifierOutput = classifierOutput
+        self.threshold = threshold
         self.trainBatchSize = trainBatchSize
         self.validationBatchSize = valBatchSize
         self.testBatchSize = testBatchSize
         self.trainSplit = trainSplit
         self.validationSplit = valSplit
         self.testSplit = testSplit
+        self.epochs = epochs
 
         self.onehotMultiKernelClass = None
         self.onehotTemporalClass = None
@@ -674,7 +681,7 @@ class SmORFCNN(nn.Module):
                 leave=False
             )
 
-        for i, batch in iterator:
+        for _, batch in iterator:
 
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
             xOnehot = xOnehot.to(self.device)
@@ -717,11 +724,81 @@ class SmORFCNN(nn.Module):
 
         return metrics
 
+    @torch.no_grad()
+    def test(
+            self,
+            testData: DataLoader,
+            threshold: float = Types.DEFAULT_SMORFCNN_THRESHOLD,
+        ) -> dict:
+
+        self.eval()
+
+        n = 0
+        runningLoss = 0.0
+        probabilities = []
+        targets = []
+
+        lossFunction = torch.nn.BCEWithLogitsLoss()
+
+        print(f"Starting testing")
+
+        iterator = tqdm(
+                enumerate(testData),
+                total=len(testData),
+                desc=f"{testData}",
+                leave=False
+            )
+
+        for _, batch in iterator:
+
+            xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            xOnehot = xOnehot.to(self.device)
+            maskOnehot = maskOnehot.to(self.device)
+            xEmbed = xEmbed.to(self.device)
+            maskEmbed = maskEmbed.to(self.device)
+            y = y.to(self.device)
+
+            outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
+
+            lossFunction(outputs, y.float())
+            probs = torch.sigmoid(outputs)
+
+            batchSize = y.size(0)
+            n += batchSize
+            runningLoss += lossFunction.item() * batchSize
+            probabilities.append(probs.detach())
+            targets.append(y.detach()) 
+
+            if 'tqdm' in locals():
+                iterator.set_postfix(loss=runningLoss / n)
+
+        probabilities = torch.cat(probabilities, dim=0)
+        targets = torch.cat(targets, dim=0)
+
+        metrics = Helpers.computeEpochMetrics(
+            probabilities,
+            targets,
+            runningLoss,
+            n,
+            threshold,
+            0
+        )
+
+        metrics = metrics | Helpers.computeEpochROC(
+            probabilities,
+            targets,
+            0
+        )
+
+        return metrics
+
     def fit(
         self,
-        epochs:      int,
-        optimizer:   torch.optim.Optimizer,
-        scheduler:   torch.optim.lr_scheduler._LRScheduler | None = None,
+        trainingDataloader:     DataLoader,
+        validationDataloader:   DataLoader,
+        epochs:                 int,
+        optimizer:              torch.optim.Optimizer,
+        scheduler:              torch.optim.lr_scheduler._LRScheduler | None = None,
     ):
         """
         Train the model for `epochs` using train/val loaders and return a training history dict.
@@ -778,7 +855,7 @@ class SmORFCNN(nn.Module):
         for epoch in epochIter:
 
             epochTrainMetrics = self.trainEpoch(
-                trainingData=self.trainDataLoader,
+                trainingData=trainingDataloader,
                 epochIndex=epoch,
                 optimizer=optimizer,
                 maxGradNorm=Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
@@ -786,9 +863,9 @@ class SmORFCNN(nn.Module):
             )
 
             epochValMetrics = self.validateEpoch(
-                validationData=self.validationDataLoader,
+                validationData=validationDataloader,
                 epochIndex=epoch,
-                threshold=self.threshold,
+                threshold=self.thre,
             )
 
             # ---- 3) (Optional) scheduler step — typically once per epoch ----
@@ -826,6 +903,8 @@ class SmORFCNN(nn.Module):
         if bestState is not None:
             self.load_state_dict(bestState)
             self.to(self.device)
+        
+        testMetrics = self.test(self.testDataLoader)
 
         Helpers.printFitSummary(trainingMetrics, validationMetrics)
 
@@ -837,15 +916,110 @@ class SmORFCNN(nn.Module):
     ):
         """
         """
-        
-        try:
-            fold_iter = tqdm(enumerate(splits, start=1), total=k, desc="K-Fold CV", leave=True)
-        except Exception:
-            fold_iter = enumerate(splits, start=1)
+    # ---------- A) Build CV pool from your existing loaders ----------
+        # Concat order is [train subset, val subset]
+        fullDataset = ConcatDataset([self.trainDataLoader.dataset, self.validationDataLoader.dataset])
 
-        for fold_idx, (train_idx, val_idx) in fold_iter:
-            if verbose:
-                print(f"\n=== Fold {fold_idx}/{k} | train={len(train_idx)}  val={len(val_idx)} ===")
-        return
+        # ---------- B) Extract labels directly (no type branching) ----------
+        # Assumptions:
+        #   trainLoader.dataset           -> Subset
+        #   trainLoader.dataset.dataset   -> TensorDataset
+        #   trainLoader.dataset.indices   -> index list/array into the base TensorDataset
+        #   base TensorDataset.tensors[-1] is labels [N]
+        tSubset = self.trainDataLoader.dataset
+        valSubset = self.validationDataLoader.dataset
+
+        tBase = tSubset.dataset          # TensorDataset
+        valBase = valSubset.dataset          # TensorDataset
+
+        tIdx = torch.as_tensor(tSubset.indices, dtype=torch.long)
+        valIdx = torch.as_tensor(valSubset.indices, dtype=torch.long)
+
+        tLabels = tBase.tensors[-1].index_select(0, tIdx)  # [N_tr]
+        valLabels = valBase.tensors[-1].index_select(0, valIdx)  # [N_va]
+
+        labels = torch.cat([tLabels, valLabels], dim=0).detach().cpu().long().numpy()  # [N_tr+N_va]
+
+        # ---------- C) Stratified KFold splits ----------
+        splitter = StratifiedKFold(n_splits=k, shuffle=True, random_state=self.seed)
+        splits = list(splitter.split(np.arange(len(labels)), labels))
+
+        # ---------- D) Bookkeeping ----------
+        foldMetrics = []
+        bestFoldF1 = -1.0
+        bestFoldState = None
+        bestFold = None
+
+        iterator = tqdm(enumerate(splits, start=1),total=k,desc=f"{k}-Fold CV",leave=True)
+
+        for foldIndex, (trainIndex, valIndex) in iterator:
+
+            print(f"\n=== Fold {foldIndex}/{k}: train={len(trainIndex)}  val={len(valIndex)} ===")
+
+            # ---------- E) Build fold-specific loaders ----------
+            trainDataset = Subset(fullDataset, indices=trainIndex)
+            valDataset = Subset(fullDataset, indices=valIndex)
+
+            trainDataloader = DataLoader(
+                trainDataset,
+                batch_size=self.trainBatchSize,
+                shuffle=True,
+                num_workers=0,
+                pin_memory=False,
+                drop_last=False
+            )
+            validationDataloader = DataLoader(
+                valDataset,
+                batch_size=self.validationBatchSize,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=False
+            )
+
+            # # ---------- F) Reinitialize model for an independent fold run ----------
+            # def _init(m):
+            #     if hasattr(m, "reset_parameters"):
+            #         m.reset_parameters()
+            # self.apply(_init)
+            # self.to(self.device)
+
+            _ = self.fit(
+                trainLoader=trainDataloader,
+                valLoader=validationDataloader,
+                epochs=self.epochs,
+                optimizer=optimizer,
+                scheduler=scheduler
+            )
+
+            # Final metrics on this fold's validation split
+            metrics = self.validateEpoch(
+                validationData=validationDataloader,
+                epochIndex=foldIndex,
+            )
+
+            foldMetrics.append(metrics)
+
+            # Keep best-by-F1 weights across folds
+            if metrics["f1"] > bestFoldF1:
+                bestFoldF1 = metrics["f1"]
+                bestFold = foldIndex
+                bestFoldState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
+
+            # Update fold-level tqdm postfix
+            if 'tqdm' in locals():
+                iterator.set_postfix_str(f"F1 {metrics['f1']:.4f}  AUC {metrics.get('roc_auc', float('nan')):.4f}")
+
+        # ---------- G) Restore the best fold checkpoint ----------
+        if bestFoldState is not None:
+            self.load_state_dict(bestFoldState)
+            self.to(self.device)
+            print(f"\nRestored best fold #{bestFold} (val F1={bestFoldF1:.4f})")
+
+        summary = Helpers.kFoldSummary(foldMetrics)
+
+        Helpers.printKFoldMetrics(foldMetrics, summary)
+
+        return foldMetrics, summary
+
     def saveModel() -> None:
         return
