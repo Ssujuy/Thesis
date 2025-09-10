@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from datasets import load_dataset, DatasetDict, Dataset
-from torch.utils.data import Dataloader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset, random_split
 import Types
 
 sequenceMapping = {
@@ -374,6 +374,37 @@ def computeEpochROC(
 
     return aucDict
 
+def kFoldSummary(foldMetrics: list) -> dict:
+    """
+    fold_metrics_list: list of dicts, each with keys:
+      loss, acc, precision, recall, learningRate, f1, TP, TN, FP, FN, auc, fpr, tpr
+    Returns a 'summary' dict with mean/std for scalar metrics and sums for counts.
+    """
+    meanKeys = ["loss", "acc", "precision", "recall", "f1", "auc", "learningRate"]
+    sumKeys = ["TP", "TN", "FP", "FN"]
+
+    summary = {}
+
+    # --- mean/std over folds for scalar metrics ---
+    for key in meanKeys:
+        values = []
+        for fold in foldMetrics:
+            value = float(fold.get(key, 0.0))
+            values.append(value)
+
+        summary[f"{key}Mean"] = float(np.nanmean(np.array(values, dtype=float)))
+        summary[f"{key}Std"]  = float(np.nanstd(np.array(values, dtype=float)))
+
+    for key in sumKeys:
+        total = 0
+        for fold in foldMetrics:
+            value = fold.get(key, 0)
+            total += int(value)
+
+        summary[f"Total{key}"] = int(total)
+
+    return summary
+
 def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     df = pd.DataFrame(metrics)
     print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
@@ -401,42 +432,10 @@ def printFitSummary(
         print(tMetricsDf)
         print(vMetricsDf)
 
-def kFoldSummary(foldMetrics: list) -> dict:
-    """
-    fold_metrics_list: list of dicts, each with keys:
-      loss, acc, precision, recall, learningRate, f1, TP, TN, FP, FN, auc, fpr, tpr
-    Returns a 'summary' dict with mean/std for scalar metrics and sums for counts.
-    """
-    meanKeys = ["loss", "acc", "precision", "recall", "f1", "auc", "learningRate"]
-    sumKeys = ["TP", "TN", "FP", "FN"]
-
-    summary = {}
-
-    # --- mean/std over folds for scalar metrics ---
-    for key in meanKeys:
-        values = []
-        for fold in foldMetrics:
-            value = float(v)
-            values.append(v)
-
-        summary[f"{key}Mean"] = float(np.nanmean(np.array(values, dtype=float)))
-        summary[f"{key}Std"]  = float(np.nanstd(np.array(values, dtype=float)))
-
-    for key in sumKeys:
-        total = 0
-        for fold in foldMetrics:
-            value = fold.get(key, 0)
-            total += int(value)
-
-        summary[f"Total{key}"] = int(total)
-
-    return summary
-
 def printKFoldMetrics(
     foldMetrics: list,
     foldMetricsSummary: dict
 )-> None:
-    
 
     df = pd.DataFrame(foldMetrics)
     print("\nPer-fold validation metrics:")
@@ -445,6 +444,59 @@ def printKFoldMetrics(
     print("\n10-Fold summary (mean ± std and sums):")
     df = pd.DataFrame(foldMetricsSummary)
     print(df)
+
+def plotLabelDistribution(
+        trainDataLoader: DataLoader,
+        validationDataLoader: DataLoader,
+        testDataLoader: DataLoader
+    ):
+    
+    totalLength = len(trainDataLoader.dataset)
+    totalLength += len(validationDataLoader.dataset)
+    totalLength += len(testDataLoader.dataset)
+
+    yTrain = trainDataLoader.dataset["y"].view(-1).cpu()
+    yVal = validationDataLoader.dataset["y"].view(-1).cpu()
+    yTest = testDataLoader.dataset["y"].view(-1).cpu()
+
+    totalPositiveTrain = int((yTrain == 1).sum().item())
+    totalPositiveVal = int((yVal == 1).sum().item())
+    totalPositiveTest = int((yTest == 1).sum().item())
+
+    totalNegativeTrain = int((yTrain == 0).sum().item())
+    totalNegativeVal = int((yVal == 0).sum().item())
+    totalNegativeTest = int((yTest == 0).sum().item())
+
+    totalPositive = totalPositiveTrain + totalPositiveVal + totalPositiveTest
+
+    # ---- 1) Grouped bar: label 0 vs 1 per split ----
+    splits = ["Training", "Validation", "Test"]
+    negatives = [totalNegativeTrain, totalNegativeVal, totalNegativeTest]
+    positives = [totalPositiveTrain, totalPositiveVal, totalPositiveTest]
+
+    x = np.arange(len(splits), dtype=float)
+    width = 0.4
+
+    fig1 = plt.figure()
+    plt.bar(x - width/2, negatives, width=width, label="Label 0 (Non-coding)")
+    plt.bar(x + width/2, positives, width=width, label="Label 1 (Coding)")
+    plt.xticks(x, splits)
+    plt.ylabel("count")
+    plt.title("Label distribution per split")
+    plt.legend()
+    plt.tight_layout()
+
+    # ---- 2) Overall bar: all splits combined ----
+    totalNegative = int(totalLength - totalPositive)
+
+    fig2 = plt.figure()
+    plt.bar(["Label 0 (Nojn-Coding)", "Label 1 (Coding)"], [totalNegative, totalPositive])
+    plt.ylabel("count")
+    plt.title("Label distribution (all splits combined)")
+    plt.tight_layout()
+
+def plotConfusionPie():
+    return
 
 def plotFitCurves(
     trainingMetrics: dict,
@@ -497,42 +549,39 @@ def plotROCCurve(validationMetrics: dict, epoch: int):
     return fig
 
 
-def whatever(fold_metrics_list, title: str = "Mean ROC (10-fold)"):
+def plotMeanROC(
+    foldMetrics: list,
+    summary: dict
+):
     """
-    Interpolates each fold's TPR onto a common FPR grid, plots mean ROC with ±1 SD band.
-    Each item in fold_metrics_list must have 'fpr', 'tpr', and 'auc'.
+    Interpolate each fold's ROC onto a common FPR grid, plot mean ROC with ±1 SD band.
+    If `summary` is provided (from kFoldSummary), its aucMean/aucStd are used for the legend.
     """
     grid = np.linspace(0.0, 1.0, 1001)
     tprs = []
     aucs = []
 
-    for fm in fold_metrics_list:
-        fpr = np.asarray(fm["fpr"], dtype=float)
-        tpr = np.asarray(fm["tpr"], dtype=float)
-        # ensure proper endpoints for interpolation
-        if fpr[0] > 0.0 or tpr[0] > 0.0:
-            fpr = np.concatenate([[0.0], fpr])
-            tpr = np.concatenate([[0.0], tpr])
-        if fpr[-1] < 1.0 or tpr[-1] < 1.0:
-            fpr = np.concatenate([fpr, [1.0]])
-            tpr = np.concatenate([tpr, [1.0]])
+    for fold in foldMetrics:
+        fpr = np.asarray(fold["fpr"], dtype=float)
+        tpr = np.asarray(fold["tpr"], dtype=float)
 
         tprs.append(np.interp(grid, fpr, tpr))
-        aucs.append(float(fm.get("auc", fm.get("roc_auc", np.nan))))
+        aucs.append(float(fold.get("auc",np.nan)))
 
-    tprs = np.vstack(tprs) if len(tprs) > 0 else np.zeros((1, grid.size))
-    mean_tpr = np.nanmean(tprs, axis=0)
-    std_tpr  = np.nanstd(tprs, axis=0)
-    mean_auc = float(np.nanmean(aucs))
-    std_auc  = float(np.nanstd(aucs))
+    tprs = np.vstack(tprs)
+    meanTpr = np.nanmean(tprs, axis=0)
+    stdTpr  = np.nanstd(tprs, axis=0)
+
+    aucMean = float(summary.get("aucMean", np.nanmean(aucs)))
+    aucStd  = float(summary.get("aucStd",  np.nanstd(aucs)))
+
 
     fig = plt.figure()
-    plt.plot(grid, mean_tpr, label=f"mean AUC = {mean_auc:.3f} ± {std_auc:.3f}")
-    # Shaded band for ±1 SD
-    lower = np.clip(mean_tpr - std_tpr, 0.0, 1.0)
-    upper = np.clip(mean_tpr + std_tpr, 0.0, 1.0)
-    plt.fill_between(grid, lower, upper, alpha=0.2, step=None)
+    plt.plot(grid, meanTpr, label=f"mean AUC = {aucMean:.3f} ± {aucStd:.3f}")
+    lower = np.clip(meanTpr - stdTpr, 0.0, 1.0)
+    upper = np.clip(meanTpr + stdTpr, 0.0, 1.0)
+    plt.fill_between(grid, lower, upper, alpha=0.2)
     plt.plot([0.0, 1.0], [0.0, 1.0], linestyle="--")
     plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
-    plt.title(title); plt.legend()
+    plt.title("Mean ROC K-fold Cross Validation"); plt.legend()
     return fig

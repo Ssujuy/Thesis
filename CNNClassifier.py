@@ -912,7 +912,7 @@ class SmORFCNN(nn.Module):
 
         Helpers.plotFitCurves(trainingMetrics, validationMetrics)
 
-        Helpers.plotROCCurve(validationMetrics, bestEpoch)
+        Helpers.plotROCCurve(testMetrics, bestEpoch)
 
         return trainingMetrics, validationMetrics
 
@@ -1024,6 +1024,8 @@ class SmORFCNN(nn.Module):
         summary = Helpers.kFoldSummary(foldMetrics)
 
         Helpers.printKFoldMetrics(foldMetrics, summary)
+
+        Helpers.plotMeanROC(foldMetrics, summary)
 
         return foldMetrics, summary
 
