@@ -1,6 +1,7 @@
 import torch
 from pathlib import Path
 import pandas as pd
+import matplotlib.pyplot as plt
 import numpy as np
 from datasets import load_dataset, DatasetDict, Dataset
 from torch.utils.data import Dataloader, TensorDataset, random_split
@@ -360,53 +361,18 @@ def computeEpochROC(
 
     truePositive = int(np.cumsum(sorted == 1))
     falsePositive = int(np.cumsum(sorted == 0))
-    truePositive = truePositive / positives
+    truePositiveRatio = truePositive / positives
     falsePositiveRatio = falsePositive / negatives
     # add (0,0) and (1,1)
     falsePositiveRatio = np.concatenate([[0.0], falsePositiveRatio, [1.0]])
-    truePositive = np.concatenate([[0.0], truePositive, [1.0]])
-    auc = float(np.trapz(truePositive, falsePositiveRatio))
+    truePositiveRatio = np.concatenate([[0.0], truePositiveRatio, [1.0]])
+    auc = float(np.trapz(truePositiveRatio, falsePositiveRatio))
     
-    aucDict = {"auc": auc, "fpr": falsePositiveRatio, "tpr": truePositive}
+    aucDict = {"auc": auc, "fpr": falsePositiveRatio, "tpr": truePositiveRatio}
 
     printEpochAUC(aucDict, epochIndex)
 
     return aucDict
-
-def computePR(
-    probabilities: torch.Tensor,
-    targets: torch.Tensor,
-    epochIndex: int
-)-> dict:
-    
-    probabilities = probabilities.detach().cpu().view(-1).numpy()
-    targets = targets.detach().cpu().view(-1).numpy().astype(np.int32)
-
-    positives = (targets == 1).sum()
-    negatives = (targets == 0).sum()
-
-    #     # Raw precision/recall at each distinct score step
-    # precision = tp / np.maximum(tp + fp, 1.0)
-    # recall    = tp / P
-
-    # # Keep thresholds aligned with raw points (useful for plotting/inspection)
-    # thresholds = s
-
-    # # ---- interpolate precision (monotone envelope) ----
-    # # Make precision non-increasing w.r.t recall (right-to-left max)
-    # # This matches the "interpolated precision" used in AP definitions.
-    # precision_envelope = np.maximum.accumulate(precision[::-1])[::-1]
-
-    # # ---- step-wise AP (VOC/sklearn-style) ----
-    # # Insert sentinel endpoints
-    # mrec = np.concatenate(([0.0], recall, [1.0]))
-    # mpre = np.concatenate(([1.0], precision_envelope, [0.0]))
-    # # Enforce envelope again across sentinels (safety)
-    # for i in range(mpre.size - 1, 0, -1):
-    #     mpre[i-1] = max(mpre[i-1], mpre[i])
-    # # Sum area of horizontal steps where recall increases
-    # idx = np.where(mrec[1:] != mrec[:-1])[0]
-    # ap = float(np.sum((mrec[idx+1] - mrec[idx]) * mpre[idx+1]))
 
 def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     df = pd.DataFrame(metrics)
@@ -479,3 +445,94 @@ def printKFoldMetrics(
     print("\n10-Fold summary (mean ± std and sums):")
     df = pd.DataFrame(foldMetricsSummary)
     print(df)
+
+def plotFitCurves(
+    trainingMetrics: dict,
+    validationMetrics: dict
+):
+    """
+    history: dict from fit() with keys:
+      train_loss, val_loss, train_acc, val_acc, train_f1, val_f1, (optional) lr
+    Creates 3 separate figures: Loss, Accuracy, F1.
+    """
+    epochs = len(trainingMetrics["loss"])
+
+    # Loss
+    fig1 = plt.figure()
+    plt.plot(epochs, trainingMetrics["loss"], label="Training Loss")
+    plt.plot(epochs, validationMetrics["loss"],   label="Validation Loss")
+    plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title("Loss"); plt.legend()
+
+    # Accuracy
+    fig2 = plt.figure()
+    plt.plot(epochs, trainingMetrics["acc"], label="Training Accuracy")
+    plt.plot(epochs, validationMetrics["acc"], label="Validation Accuracy")
+    plt.xlabel("Epoch"); plt.ylabel("Accuracy"); plt.title("Accuracy"); plt.legend()
+
+    # F1
+    fig3 = plt.figure()
+    plt.plot(epochs, trainingMetrics["f1"], label="Training F1")
+    plt.plot(epochs, validationMetrics["f1"], label="Validation F1")
+    plt.xlabel("Epoch"); plt.ylabel("F1"); plt.title("F1"); plt.legend()
+
+    return fig1, fig2, fig3
+
+def plotROCCurve(validationMetrics: dict, epoch: int):
+    """
+    metrics must contain: 'fpr' (list), 'tpr' (list), 'auc' (float) or 'roc_auc'.
+    """
+
+    if epoch == 0 or epoch is None:
+        raise ValueError("Epoch must have an integer value > 0")
+
+    fpr = np.asarray(validationMetrics[epoch - 1].get("fpr", []), dtype=float)
+    tpr = np.asarray(validationMetrics[epoch - 1].get("tpr", []), dtype=float)
+    auc = float(validationMetrics[epoch - 1].get("auc"))
+
+    fig = plt.figure()
+    plt.plot(fpr, tpr, label=f"AUC = {auc:.3f}")
+    plt.plot([0.0, 1.0], [0.0, 1.0], linestyle="--")
+    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve"); plt.legend()
+    return fig
+
+
+def whatever(fold_metrics_list, title: str = "Mean ROC (10-fold)"):
+    """
+    Interpolates each fold's TPR onto a common FPR grid, plots mean ROC with ±1 SD band.
+    Each item in fold_metrics_list must have 'fpr', 'tpr', and 'auc'.
+    """
+    grid = np.linspace(0.0, 1.0, 1001)
+    tprs = []
+    aucs = []
+
+    for fm in fold_metrics_list:
+        fpr = np.asarray(fm["fpr"], dtype=float)
+        tpr = np.asarray(fm["tpr"], dtype=float)
+        # ensure proper endpoints for interpolation
+        if fpr[0] > 0.0 or tpr[0] > 0.0:
+            fpr = np.concatenate([[0.0], fpr])
+            tpr = np.concatenate([[0.0], tpr])
+        if fpr[-1] < 1.0 or tpr[-1] < 1.0:
+            fpr = np.concatenate([fpr, [1.0]])
+            tpr = np.concatenate([tpr, [1.0]])
+
+        tprs.append(np.interp(grid, fpr, tpr))
+        aucs.append(float(fm.get("auc", fm.get("roc_auc", np.nan))))
+
+    tprs = np.vstack(tprs) if len(tprs) > 0 else np.zeros((1, grid.size))
+    mean_tpr = np.nanmean(tprs, axis=0)
+    std_tpr  = np.nanstd(tprs, axis=0)
+    mean_auc = float(np.nanmean(aucs))
+    std_auc  = float(np.nanstd(aucs))
+
+    fig = plt.figure()
+    plt.plot(grid, mean_tpr, label=f"mean AUC = {mean_auc:.3f} ± {std_auc:.3f}")
+    # Shaded band for ±1 SD
+    lower = np.clip(mean_tpr - std_tpr, 0.0, 1.0)
+    upper = np.clip(mean_tpr + std_tpr, 0.0, 1.0)
+    plt.fill_between(grid, lower, upper, alpha=0.2, step=None)
+    plt.plot([0.0, 1.0], [0.0, 1.0], linestyle="--")
+    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
+    plt.title(title); plt.legend()
+    return fig

@@ -815,6 +815,7 @@ class SmORFCNN(nn.Module):
         self.to(self.device)
 
         bestF1 = -1.0
+        bestEpoch = 0
         bestState: dict[str, torch.Tensor] | None = None
 
         trainingMetrics = {
@@ -880,7 +881,7 @@ class SmORFCNN(nn.Module):
             for key in epochTrainMetrics:
                 trainingMetrics[key].append(epochTrainMetrics[key])
 
-            for key in validationMetrics:
+            for key in epochValMetrics:
                 validationMetrics[key].append(epochValMetrics[key])
 
             epochLR = optimizer.param_groups[0]["lr"]
@@ -889,6 +890,7 @@ class SmORFCNN(nn.Module):
             # ---- 5) Save best-by-val-F1 weights ----
             if validationMetrics["f1"] > bestF1:
                 bestF1 = validationMetrics["f1"]
+                bestEpoch = epoch
                 # Keep a CPU copy; avoids GPU memory bloat and is device-agnostic to reload
                 bestState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
 
@@ -907,6 +909,10 @@ class SmORFCNN(nn.Module):
         testMetrics = self.test(self.testDataLoader)
 
         Helpers.printFitSummary(trainingMetrics, validationMetrics)
+
+        Helpers.plotFitCurves(trainingMetrics, validationMetrics)
+
+        Helpers.plotROCCurve(validationMetrics, bestEpoch)
 
         return trainingMetrics, validationMetrics
 
