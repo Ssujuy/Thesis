@@ -914,6 +914,8 @@ class SmORFCNN(nn.Module):
 
         Helpers.plotROCCurve(testMetrics, bestEpoch)
 
+        Helpers.plotConfusionPie(trainingMetrics, validationMetrics, testMetrics, epochs)
+
         return trainingMetrics, validationMetrics
 
     def kFoldCrossValidation(

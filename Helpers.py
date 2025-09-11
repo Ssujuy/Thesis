@@ -495,8 +495,42 @@ def plotLabelDistribution(
     plt.title("Label distribution (all splits combined)")
     plt.tight_layout()
 
-def plotConfusionPie():
-    return
+    plt.show()
+
+    return fig1, fig2
+
+def plotConfusionPie(
+    trainingMetrics: list,
+    validationMetrics: list,
+    testMetrics: dict,
+    epochs: int
+):
+    TP,TN,FP,FN,total = 0
+
+    for epoch in epochs:
+        TP += trainingMetrics["TP"][epoch] + validationMetrics["TP"][epoch]
+        TN += trainingMetrics["TN"][epoch] + validationMetrics["TN"][epoch]
+        FP += trainingMetrics["FP"][epoch] + validationMetrics["FP"][epoch]
+        FN += trainingMetrics["FN"][epoch] + validationMetrics["FN"][epoch]
+
+    TP += testMetrics["TP"]
+    TN += testMetrics["TN"]
+    FP += testMetrics["FP"]
+    FN += testMetrics["FN"]
+
+    total = TP + TN + FP + FN
+
+    fig = plt.figure()
+    sizes = [TP, TN, FP, FN]
+    labels = ["TP", "TN", "FP", "FN"]
+    # autopct shows percentages relative to (train+val) total size
+    plt.pie(sizes, labels=labels, autopct=lambda p: f"{p:.1f}%")
+    plt.title("Confusion proportions on train+val+test")
+    plt.tight_layout()
+
+    plt.show()
+
+    return fig
 
 def plotFitCurves(
     trainingMetrics: dict,
@@ -527,6 +561,8 @@ def plotFitCurves(
     plt.plot(epochs, validationMetrics["f1"], label="Validation F1")
     plt.xlabel("Epoch"); plt.ylabel("F1"); plt.title("F1"); plt.legend()
 
+    plt.show()
+
     return fig1, fig2, fig3
 
 def plotROCCurve(validationMetrics: dict, epoch: int):
@@ -546,6 +582,9 @@ def plotROCCurve(validationMetrics: dict, epoch: int):
     plt.plot([0.0, 1.0], [0.0, 1.0], linestyle="--")
     plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
     plt.title("ROC Curve"); plt.legend()
+
+    plt.show()
+
     return fig
 
 
@@ -584,4 +623,7 @@ def plotMeanROC(
     plt.plot([0.0, 1.0], [0.0, 1.0], linestyle="--")
     plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
     plt.title("Mean ROC K-fold Cross Validation"); plt.legend()
+
+    plt.show()
+
     return fig
