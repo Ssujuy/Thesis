@@ -98,8 +98,7 @@ def loadFeaturesFromPt(path: str) -> TensorDataset:
     maskOnehot = (onehot.sum(dim=-1) > 0).to(torch.float32)     # [N,L]
 
     # --- embeddings: numpy [N,D] -> tensor [N,D,1], mask = ones ---
-    embnp = features["embeddings"]                                     # (N,D) numpy
-    xEmbed = torch.from_numpy(embnp).to(torch.float32).unsqueeze(-1)  # [N,D,1]
+    xEmbed = torch.as_tensor(features["embeddings"], dtype=torch.float32).unsqueeze(-1)
     maskEmbed = torch.ones((xEmbed.size(0), 1), dtype=torch.float32)  # [N,1]
 
 
@@ -130,7 +129,10 @@ def toDataloaders(
 
     n = len(dataset)
     gen = torch.Generator().manual_seed(seed)
-    trainDs, validationDs, testDs = random_split(dataset, [trainSplit * n, validationSplit * n, testSplit * n], generator=gen)
+    nTrain = int(round(trainSplit * n))
+    nVal   = int(round(validationSplit * n))
+    nTest  = n - nTrain - nVal
+    trainDs, validationDs, testDs = random_split(dataset, [nTrain, nVal, nTest], generator=gen)
     
     train = DataLoader(
         trainDs,
@@ -159,12 +161,28 @@ def toDataloaders(
 
     return train, validation, test
 
-def printDataloader(name: str, dataL: Dataloader) -> None:
+def printDataloader(name: str, data: DataLoader) -> None:
 
-    print(f"Print 3 rows for {name} DataLoader with shape: {dataL.shape}")
+    # number of batches in an epoch
+    batches = len(data)
+
+    # number of samples
+    samples = len(data.dataset)
+
+    # peek at shapes from the first batch
+    xOnehot, maskOnehot, xEmbed, maskEmbed, y = next(iter(data))
+
+    print(f"Print 3 rows for {name} DataLoader")
+    print(f"  - Number of batches: {batches}")
+    print(f"  - Number of samples: {samples}")
+    print(f"  - One Hot Encoded sequences shape: {xOnehot.shape}")
+    print(f"  - Mask for One Hot Encoded sequences shape: {maskOnehot.shape}")
+    print(f"  - Embeddings shape: {xEmbed.shape}")
+    print(f"  - Mask for Embeddings shape: {maskEmbed.shape}")
+    print(f"  - Labels shape: {y.shape}")
 
     try:
-        batch = next(iter(dataL))
+        batch = next(iter(data))
         xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
 
         table = []

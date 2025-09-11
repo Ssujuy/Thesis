@@ -96,6 +96,7 @@ class ResidualBlock(nn.Module):
     def __init__(
             self,
             inputChannels: int,
+            outputChannels: int,
             kernel: int,
             stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
             padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
@@ -107,6 +108,7 @@ class ResidualBlock(nn.Module):
         super().__init__()
 
         self.inputChannels = inputChannels
+        self.outputChannels = outputChannels
         self.kernel = kernel
         self.stride = stride
         self.padding = padding
@@ -117,7 +119,7 @@ class ResidualBlock(nn.Module):
 
         self.convolution1 = ConvolutionBlock(
             self.inputChannels,
-            self.inputChannels,
+            self.outputChannels,
             self.kernel,
             stride=self.stride,
             padding=self.padding,
@@ -129,7 +131,7 @@ class ResidualBlock(nn.Module):
 
         self.convolution2 = ConvolutionBlock(
             self.inputChannels,
-            self.inputChannels,
+            self.outputChannels,
             self.kernel,
             stride=self.stride,
             padding=self.padding,
@@ -143,6 +145,7 @@ class ResidualBlock(nn.Module):
 
         print("Residual Block Parameters:")
         print(f" - Input Channels: {self.inputChannels}")
+        print(f" - Output Channels: {self.outputChannels}")        
         print(f" - Kernel: {self.kernel}")
         print(f" - Stride: {self.stride}")
         print(f" - Padding: {self.padding}")
@@ -478,21 +481,22 @@ class SmORFCNN(nn.Module):
 
     def initializeDataset(self) -> None:
 
-        dataset = Dataset(self.featuresPath)
+        tensorDataset = Helpers.loadFeaturesFromPt(self.featuresPath)
 
         self.trainDataLoader, self.validationDataLoader, self.testDataLoader = Helpers.toDataloaders(
-            dataset,
+            tensorDataset,
             self.trainSplit,
             self.validationSplit,
             self.testSplit,
             self.trainBatchSize,
             self.validationBatchSize,
-            self.testBatchSize
+            self.testBatchSize,
+            self.seed
         )
 
-        Helpers.printDataloader(self.trainDataLoader)
-        Helpers.printDataloader(self.validationDataLoader)
-        Helpers.printDataloader(self.testDataLoader)
+        Helpers.printDataloader("Training", self.trainDataLoader)
+        Helpers.printDataloader("Validation", self.validationDataLoader)
+        Helpers.printDataloader("Testing", self.testDataLoader)
 
     def _calculateFusedDim(self) -> int:
 
@@ -1033,3 +1037,8 @@ class SmORFCNN(nn.Module):
 
     def saveModel() -> None:
         return
+    
+
+mymodel = SmORFCNN(512,768,"features.pt")
+mymodel.initializeDataset()
+print("WTHELLY")
