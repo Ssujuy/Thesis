@@ -32,7 +32,6 @@ def saveFeaturesPtFile(
     and saves them to PyTorch file, for training of smORF CNN classifier.
     """
 
-    # Save everything in one .pt file
     payload = {
         "sequences": sequences,
         "onehot": onehot,
@@ -103,7 +102,6 @@ def loadFeaturesFromPt(path: str) -> TensorDataset:
 
 
     if features["labels"] != None:
-        # --- labels ---
         y = torch.as_tensor(features["labels"], dtype=torch.long)           # [N]
     
     else:
@@ -163,13 +161,10 @@ def toDataloaders(
 
 def printDataloader(name: str, data: DataLoader) -> None:
 
-    # number of batches in an epoch
     batches = len(data)
 
-    # number of samples
     samples = len(data.dataset)
 
-    # peek at shapes from the first batch
     xOnehot, maskOnehot, xEmbed, maskEmbed, y = next(iter(data))
 
     print(f"Print 3 rows for {name} DataLoader")
@@ -280,7 +275,6 @@ def globalAveragePooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     globalMax --> [B, C]
     """
 
-    # broadcast mask over channels
     m = mask[:, None, :]
 
     xNInf = x.masked_fill(m == 0, float("-inf"))
@@ -310,6 +304,8 @@ def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
 ########## ----------- End --------- ##########
 
+########## ----------- Compute Metrics Functions --------- ##########
+
 def computeEpochMetrics(
     probabilities: torch.Tensor,
     targets: torch.Tensor,
@@ -320,19 +316,22 @@ def computeEpochMetrics(
 ) -> dict:
     """
     Compute epoch-level metrics and convert runningLoss to sample epoch loss.\n
-    Returns: {'loss','acc','precision','recall','f1','TP','TN','FP','FN'}\n
+    probabillities ---> calculated from model's sigmoid.\n
+    targets        ---> labels for each item from dataset.\n
+    runningLoss    ---> epoch's current loss.\n
+    n              ---> size of dataset.\n
+    threshold      ---> Base float number for positive-negative.\n
+    epochIndex     ---> Current epoch.\n
+    Returns dictionary {'loss','acc','precision','recall','f1','TP','TN','FP','FN'}.
     """
 
-    # Flatten & types
     probabilities = probabilities.view(-1)
     targets = targets.view(-1).to(dtype=torch.long)
 
-    # Threshold → predictions
     yPred = (probabilities >= threshold)
     positive = (targets == 1)
     negative = (targets == 0)
 
-    #Calculating TP, TN, FP, FN
     truePositive = (yPred & positive).sum().item()
     falsePositive = (yPred & negative).sum().item()
     falseNegative = ((~yPred) & positive).sum().item()
@@ -368,10 +367,17 @@ def computeEpochROC(
     targets: torch.Tensor,
     epochIndex: int
 ) -> dict:
+    """
+    Computes Epoch AUC, True Positive Ration and False Positive Ration.\n
+    probabillities ---> calculated from model's sigmoid.\n
+    targets        ---> labels for each item from dataset.\n
+    epochIndex     ---> Current epoch.\n
+    Returns dictionary {"auc", "tpr", "fpr"}.
+    """
 
     probabilities = probabilities.detach().cpu().numpy().astype(np.float64)
     targets = targets.detach().cpu().numpy().astype(np.int32)
-    # sort by descending score
+
     order = np.argsort(-probabilities)
     sorted = targets[order]
     positives = (sorted == 1).sum()
@@ -381,7 +387,7 @@ def computeEpochROC(
     falsePositive = int(np.cumsum(sorted == 0))
     truePositiveRatio = truePositive / positives
     falsePositiveRatio = falsePositive / negatives
-    # add (0,0) and (1,1)
+
     falsePositiveRatio = np.concatenate([[0.0], falsePositiveRatio, [1.0]])
     truePositiveRatio = np.concatenate([[0.0], truePositiveRatio, [1.0]])
     auc = float(np.trapz(truePositiveRatio, falsePositiveRatio))
@@ -394,16 +400,17 @@ def computeEpochROC(
 
 def kFoldSummary(foldMetrics: list) -> dict:
     """
-    fold_metrics_list: list of dicts, each with keys:
-      loss, acc, precision, recall, learningRate, f1, TP, TN, FP, FN, auc, fpr, tpr
-    Returns a 'summary' dict with mean/std for scalar metrics and sums for counts.
+    Calculates summary from kFold Cross Validation.\n
+    Mean and Std for keys ---> "loss", "acc", "precision", "recall", "f1", "auc", "learningRate".\n
+    Total sum for keys    ---> "TP", "TN", "FP", "FN"
+    foldMetrics           ---> List for all metrics k, calculated in KFoldCrossValidation.\n
+    Returns a dictionary with mean/std for scalar metrics and sums for counts.
     """
     meanKeys = ["loss", "acc", "precision", "recall", "f1", "auc", "learningRate"]
     sumKeys = ["TP", "TN", "FP", "FN"]
 
     summary = {}
 
-    # --- mean/std over folds for scalar metrics ---
     for key in meanKeys:
         values = []
         for fold in foldMetrics:
@@ -423,38 +430,57 @@ def kFoldSummary(foldMetrics: list) -> dict:
 
     return summary
 
+########## ----------- End --------- ##########
+
+########## ----------- Print Metrics Function --------- ##########
+
 def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
+    """
+    Prints epoch metrics as DataFrame.\n
+    metrics     ---> Dictionary for per Epoch metrics.\n
+    epochIndex  ---> Current epoch.
+    """
     df = pd.DataFrame(metrics)
     print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
     print(df)
 
 def printEpochAUC(auc: dict, epochIndex: int) -> None:
+    """
+    Prints epoch AUC,False Positive Ratio and False Negative Ratio as DataFrame.\n
+    auc         ---> Dictionary for per Epoch auc metrics.\n
+    epochIndex  ---> Current epoch.
+    """
     df = pd.DataFrame(auc)
     print(f"Epoch {epochIndex} AUC , False Positive Ratio and False Negative Ratio")
     print(df)
 
-def printFitSummary(
-        trainingMetrics: dict,
-        validationMetrics: dict
-    ) -> None:
-        
-        tMetricsDf  =  pd.DataFrame({
-            trainingMetrics
-        })
+def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
+    """
+    Prints summary of fit (train-validation-test) as DataFrame.\n
+    trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
+    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.
+    """
+    tMetricsDf  =  pd.DataFrame({
+        trainingMetrics
+    })
 
-        vMetricsDf = pd.DataFrame({
-            validationMetrics
-        })
+    vMetricsDf = pd.DataFrame({
+        validationMetrics
+    })
 
-        print("----------########## Summary of Metrics computed during Fit ##########----------")
-        print(tMetricsDf)
-        print(vMetricsDf)
+    print("Summary of Metrics computed during Fit")
+    print(tMetricsDf)
+    print(vMetricsDf)
 
 def printKFoldMetrics(
     foldMetrics: list,
     foldMetricsSummary: dict
 )-> None:
-
+    """
+    Prints fold metrics and metrics summary as DataFrame.\n
+    foldMetrics         ---> k-size list containing every fold's metrics.\n
+    foldMetricsSummary  ---> dictionary containing summary (sum,mean and std) of fold metrics.
+    """
     df = pd.DataFrame(foldMetrics)
     print("\nPer-fold validation metrics:")
     print(df)
@@ -463,12 +489,22 @@ def printKFoldMetrics(
     df = pd.DataFrame(foldMetricsSummary)
     print(df)
 
+########## ----------- End --------- ##########
+
+########## ----------- Plot Functions --------- ##########
+
 def plotLabelDistribution(
         trainDataLoader: DataLoader,
         validationDataLoader: DataLoader,
         testDataLoader: DataLoader
     ):
-    
+    """
+    Plots bar diagram for label distirbution in each dataset (train-val-test)\n
+    and bar diagram for the total dataset.\n
+    trainDataLoader         ---> DataLoader for model training.\n
+    validationDataLoader    ---> DataLoader for model validation.\n
+    testDataLoader          ---> DataLoader for model testing.
+    """
     totalLength = len(trainDataLoader.dataset)
     totalLength += len(validationDataLoader.dataset)
     totalLength += len(testDataLoader.dataset)
@@ -487,7 +523,6 @@ def plotLabelDistribution(
 
     totalPositive = totalPositiveTrain + totalPositiveVal + totalPositiveTest
 
-    # ---- 1) Grouped bar: label 0 vs 1 per split ----
     splits = ["Training", "Validation", "Test"]
     negatives = [totalNegativeTrain, totalNegativeVal, totalNegativeTest]
     positives = [totalPositiveTrain, totalPositiveVal, totalPositiveTest]
@@ -504,11 +539,10 @@ def plotLabelDistribution(
     plt.legend()
     plt.tight_layout()
 
-    # ---- 2) Overall bar: all splits combined ----
     totalNegative = int(totalLength - totalPositive)
 
     fig2 = plt.figure()
-    plt.bar(["Label 0 (Nojn-Coding)", "Label 1 (Coding)"], [totalNegative, totalPositive])
+    plt.bar(["Label 0 (Non-Coding)", "Label 1 (Coding)"], [totalNegative, totalPositive])
     plt.ylabel("count")
     plt.title("Label distribution (all splits combined)")
     plt.tight_layout()
@@ -523,6 +557,14 @@ def plotConfusionPie(
     testMetrics: dict,
     epochs: int
 ):
+    """
+    Plot Pie chart for True Positive, True Negative, False Positve and False Negative,\n
+    computed during fit of model (train-validation-test).\n
+    trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
+    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.\n
+    testMetrics         ---> Dictionary contaning epoch-size lists for each metric key in testing.\n
+    epochs              ---> Total epochs of fit.
+    """
     TP,TN,FP,FN,total = 0
 
     for epoch in epochs:
@@ -541,9 +583,9 @@ def plotConfusionPie(
     fig = plt.figure()
     sizes = [TP, TN, FP, FN]
     labels = ["TP", "TN", "FP", "FN"]
-    # autopct shows percentages relative to (train+val) total size
+
     plt.pie(sizes, labels=labels, autopct=lambda p: f"{p:.1f}%")
-    plt.title("Confusion proportions on train+val+test")
+    plt.title("Confusion proportions on Traing-Validation-Testing")
     plt.tight_layout()
 
     plt.show()
@@ -555,25 +597,22 @@ def plotFitCurves(
     validationMetrics: dict
 ):
     """
-    history: dict from fit() with keys:
-      train_loss, val_loss, train_acc, val_acc, train_f1, val_f1, (optional) lr
-    Creates 3 separate figures: Loss, Accuracy, F1.
+    Creates 3 separate figures: Loss, Accuracy, F1. Comparing training with validation.\n
+    trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
+    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.
     """
     epochs = len(trainingMetrics["loss"])
 
-    # Loss
     fig1 = plt.figure()
     plt.plot(epochs, trainingMetrics["loss"], label="Training Loss")
     plt.plot(epochs, validationMetrics["loss"],   label="Validation Loss")
     plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title("Loss"); plt.legend()
 
-    # Accuracy
     fig2 = plt.figure()
     plt.plot(epochs, trainingMetrics["acc"], label="Training Accuracy")
     plt.plot(epochs, validationMetrics["acc"], label="Validation Accuracy")
     plt.xlabel("Epoch"); plt.ylabel("Accuracy"); plt.title("Accuracy"); plt.legend()
 
-    # F1
     fig3 = plt.figure()
     plt.plot(epochs, trainingMetrics["f1"], label="Training F1")
     plt.plot(epochs, validationMetrics["f1"], label="Validation F1")
@@ -585,7 +624,9 @@ def plotFitCurves(
 
 def plotROCCurve(validationMetrics: dict, epoch: int):
     """
-    metrics must contain: 'fpr' (list), 'tpr' (list), 'auc' (float) or 'roc_auc'.
+    Plot ROC AUC Curve for best epoch during fit.\n
+    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.\n
+    epoch               ---> F1 best Epoch.
     """
 
     if epoch == 0 or epoch is None:
@@ -611,8 +652,9 @@ def plotMeanROC(
     summary: dict
 ):
     """
-    Interpolate each fold's ROC onto a common FPR grid, plot mean ROC with ±1 SD band.
-    If `summary` is provided (from kFoldSummary), its aucMean/aucStd are used for the legend.
+    Plot ROC on FPR grid and mean ROC.\n
+    foldMetrics ---> k-size list containing every fold's metrics.\n
+    summary     ---> dictionary containing summary (sum,mean and std) of fold metrics.
     """
     grid = np.linspace(0.0, 1.0, 1001)
     tprs = []
@@ -645,3 +687,5 @@ def plotMeanROC(
     plt.show()
 
     return fig
+
+########## ----------- End --------- ##########

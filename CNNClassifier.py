@@ -1085,4 +1085,3 @@ class SmORFCNN(nn.Module):
 
 mymodel = SmORFCNN(512,768,"features.pt")
 mymodel.initializeDataset()
-print("WTHELLY")
