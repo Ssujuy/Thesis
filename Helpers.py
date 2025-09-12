@@ -202,8 +202,12 @@ def printDataloader(name: str, data: DataLoader) -> None:
 def loadDatasetPercentage(datasetPath: str, percentage: int)-> DatasetDict:
     
     """
-    Function that shuffles, takes a percentage of the dataset
-    then splits for training and validation.
+    Function that shuffles, takes a percentage of the dataset then splits for training and validation.\n
+        Parameters:
+            datasetPath     ---> String relative path to the csv dataset.\n
+            percentage      ---> Percentage of the dataset to use.\n
+        Returns:
+            Dataset dictionary split for training and test.
     """
 
     fullDataset = load_dataset("csv",data_files=datasetPath,split="train")
@@ -225,7 +229,11 @@ def loadDatasetPercentage(datasetPath: str, percentage: int)-> DatasetDict:
 def kmer(sequence: str, k: int, ambiguousState: Types.KmerAmbiguousState):
 
     """
-    Function that splits a DNA sequence into k-mer parts.
+    Function that splits a DNA sequence into k-mer parts.\n
+    sequence        ---> DNA sequence as a string.\n
+    k               ---> size of each k-mer.\n
+    ambiguousState  ---> Masking to use for unknown characters for DNABERT.\n
+    Returns list with string items of size k.
     """
 
     kmerSequence = []
@@ -247,8 +255,11 @@ def kmer(sequence: str, k: int, ambiguousState: Types.KmerAmbiguousState):
 
 def sequenceTo1Hot(sequence: str)-> torch.Tensor:
     """
-    Helper function to create 1-hot encoded tensor
-    from a DNA sequence input, padded to 512 default length.
+    Helper function to create 1-hot encoded tensor, from a DNA sequence input, padded to 512 default length.\n
+        Parameters:
+            sequence    ---> DNA sequence as a string.\n
+        Returns:
+            DNA sequence as 1hot encoded Tensor.
     """
     encoded = torch.zeros(Types.DEFAULT_DNABERT6_WINDOW_SIZE,4)
     
@@ -265,14 +276,18 @@ def sequenceTo1Hot(sequence: str)-> torch.Tensor:
 
 ########## ----------- Pooling Functions --------- ##########
 
-def globalAveragePooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
     """
-    Calculate `Masked Global Max`. For 1hot encoded sequences
-    make padded positions to -inf using the mask so they cant win the MAX.
-
-    mask --> [B, 1, L]
-    globalMax --> [B, C]
+    Calculate `Masked Global Max`. For 1hot encoded sequences,\n
+    make padded positions to -inf using the mask so they cant win the MAX.\n
+        Parameters:
+            x               ---> input Tensor.\n
+            mask            ---> mask of input Tensor.\n
+    mask        ---> [B, 1, L].\n
+    globalMax   ---> [B, C].\n
+        Returns:
+            Global Max Tensor.
     """
 
     m = mask[:, None, :]
@@ -283,14 +298,18 @@ def globalAveragePooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
     return globalMax
 
-def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+def globalAveragePooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
     """
-    Calculate `Masked Global Average`. For 1hot encoded sequences
-    zero-out padded positions using the mask so they are not included to sum.
-
-    denom --> [B, 1]
-    globalAverage --> [B, C]
+    Calculate `Masked Global Average`. For 1hot encoded sequences,\n
+    zero-out padded positions using the mask so they are not included to sum.\n
+        Parameters:
+            x               ---> input Tensor.\n
+            mask            ---> mask of input Tensor.\n
+    denom           ---> [B, 1].\n
+    globalAverage   ---> [B, C].\n
+        Returns:
+            Returns Global Average Tensor.
     """
 
     m = mask[:, None, :]
@@ -316,13 +335,15 @@ def computeEpochMetrics(
 ) -> dict:
     """
     Compute epoch-level metrics and convert runningLoss to sample epoch loss.\n
-    probabillities ---> calculated from model's sigmoid.\n
-    targets        ---> labels for each item from dataset.\n
-    runningLoss    ---> epoch's current loss.\n
-    n              ---> size of dataset.\n
-    threshold      ---> Base float number for positive-negative.\n
-    epochIndex     ---> Current epoch.\n
-    Returns dictionary {'loss','acc','precision','recall','f1','TP','TN','FP','FN'}.
+        Parameters:
+            probabillities ---> calculated from model's sigmoid.\n
+            targets        ---> labels for each item from dataset.\n
+            runningLoss    ---> epoch's current loss.\n
+            n              ---> size of dataset.\n
+            threshold      ---> Base float number for positive-negative.\n
+            epochIndex     ---> Current epoch.\n
+        Returns:
+            dictionary {'loss','acc','precision','recall','f1','TP','TN','FP','FN'}.
     """
 
     probabilities = probabilities.view(-1)
@@ -369,10 +390,12 @@ def computeEpochROC(
 ) -> dict:
     """
     Computes Epoch AUC, True Positive Ration and False Positive Ration.\n
-    probabillities ---> calculated from model's sigmoid.\n
-    targets        ---> labels for each item from dataset.\n
-    epochIndex     ---> Current epoch.\n
-    Returns dictionary {"auc", "tpr", "fpr"}.
+        Parameters:
+            probabillities ---> calculated from model's sigmoid.\n
+            targets        ---> labels for each item from dataset.\n
+            epochIndex     ---> Current epoch.\n
+        Returns:
+            dictionary {"auc", "tpr", "fpr"}.
     """
 
     probabilities = probabilities.detach().cpu().numpy().astype(np.float64)
@@ -402,9 +425,11 @@ def kFoldSummary(foldMetrics: list) -> dict:
     """
     Calculates summary from kFold Cross Validation.\n
     Mean and Std for keys ---> "loss", "acc", "precision", "recall", "f1", "auc", "learningRate".\n
-    Total sum for keys    ---> "TP", "TN", "FP", "FN"
-    foldMetrics           ---> List for all metrics k, calculated in KFoldCrossValidation.\n
-    Returns a dictionary with mean/std for scalar metrics and sums for counts.
+    Total sum for keys    ---> "TP", "TN", "FP", "FN".\n
+        Parameters:
+            foldMetrics           ---> List for all metrics k, calculated in KFoldCrossValidation.\n
+        Returns:
+            dictionary with mean/std for scalar metrics and sums for counts.
     """
     meanKeys = ["loss", "acc", "precision", "recall", "f1", "auc", "learningRate"]
     sumKeys = ["TP", "TN", "FP", "FN"]
@@ -437,8 +462,9 @@ def kFoldSummary(foldMetrics: list) -> dict:
 def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     """
     Prints epoch metrics as DataFrame.\n
-    metrics     ---> Dictionary for per Epoch metrics.\n
-    epochIndex  ---> Current epoch.
+        Parameters:
+            metrics     ---> Dictionary for per Epoch metrics.\n
+            epochIndex  ---> Current epoch.
     """
     df = pd.DataFrame(metrics)
     print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
@@ -447,8 +473,9 @@ def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
 def printEpochAUC(auc: dict, epochIndex: int) -> None:
     """
     Prints epoch AUC,False Positive Ratio and False Negative Ratio as DataFrame.\n
-    auc         ---> Dictionary for per Epoch auc metrics.\n
-    epochIndex  ---> Current epoch.
+        Parameters:
+            auc         ---> Dictionary for per Epoch auc metrics.\n
+            epochIndex  ---> Current epoch.
     """
     df = pd.DataFrame(auc)
     print(f"Epoch {epochIndex} AUC , False Positive Ratio and False Negative Ratio")
@@ -457,8 +484,9 @@ def printEpochAUC(auc: dict, epochIndex: int) -> None:
 def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
     """
     Prints summary of fit (train-validation-test) as DataFrame.\n
-    trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
-    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.
+        Parameters:
+            trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
+            validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.
     """
     tMetricsDf  =  pd.DataFrame({
         trainingMetrics
@@ -478,8 +506,9 @@ def printKFoldMetrics(
 )-> None:
     """
     Prints fold metrics and metrics summary as DataFrame.\n
-    foldMetrics         ---> k-size list containing every fold's metrics.\n
-    foldMetricsSummary  ---> dictionary containing summary (sum,mean and std) of fold metrics.
+        Parameters:
+            foldMetrics         ---> k-size list containing every fold's metrics.\n
+            foldMetricsSummary  ---> dictionary containing summary (sum,mean and std) of fold metrics.
     """
     df = pd.DataFrame(foldMetrics)
     print("\nPer-fold validation metrics:")
@@ -501,9 +530,10 @@ def plotLabelDistribution(
     """
     Plots bar diagram for label distirbution in each dataset (train-val-test)\n
     and bar diagram for the total dataset.\n
-    trainDataLoader         ---> DataLoader for model training.\n
-    validationDataLoader    ---> DataLoader for model validation.\n
-    testDataLoader          ---> DataLoader for model testing.
+        Parameters:
+            trainDataLoader         ---> DataLoader for model training.\n
+            validationDataLoader    ---> DataLoader for model validation.\n
+            testDataLoader          ---> DataLoader for model testing.
     """
     totalLength = len(trainDataLoader.dataset)
     totalLength += len(validationDataLoader.dataset)
@@ -560,10 +590,11 @@ def plotConfusionPie(
     """
     Plot Pie chart for True Positive, True Negative, False Positve and False Negative,\n
     computed during fit of model (train-validation-test).\n
-    trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
-    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.\n
-    testMetrics         ---> Dictionary contaning epoch-size lists for each metric key in testing.\n
-    epochs              ---> Total epochs of fit.
+        Parameters:
+            trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
+            validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.\n
+            testMetrics         ---> Dictionary contaning epoch-size lists for each metric key in testing.\n
+            epochs              ---> Total epochs of fit.
     """
     TP,TN,FP,FN,total = 0
 
@@ -598,8 +629,9 @@ def plotFitCurves(
 ):
     """
     Creates 3 separate figures: Loss, Accuracy, F1. Comparing training with validation.\n
-    trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
-    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.
+        Parameters:
+            trainingMetrics     ---> Dictionary contaning epoch-size lists for each metric key in training.\n
+            validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.
     """
     epochs = len(trainingMetrics["loss"])
 
@@ -625,8 +657,9 @@ def plotFitCurves(
 def plotROCCurve(validationMetrics: dict, epoch: int):
     """
     Plot ROC AUC Curve for best epoch during fit.\n
-    validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.\n
-    epoch               ---> F1 best Epoch.
+        Paramters:
+            validationMetrics   ---> Dictionary contaning epoch-size lists for each metric key in validation.\n
+            epoch               ---> F1 best Epoch.
     """
 
     if epoch == 0 or epoch is None:
@@ -653,8 +686,9 @@ def plotMeanROC(
 ):
     """
     Plot ROC on FPR grid and mean ROC.\n
-    foldMetrics ---> k-size list containing every fold's metrics.\n
-    summary     ---> dictionary containing summary (sum,mean and std) of fold metrics.
+        Parameters:
+            foldMetrics ---> k-size list containing every fold's metrics.\n
+            summary     ---> dictionary containing summary (sum,mean and std) of fold metrics.
     """
     grid = np.linspace(0.0, 1.0, 1001)
     tprs = []
