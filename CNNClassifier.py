@@ -369,6 +369,13 @@ class SmORFCNN(nn.Module):
         dropout: float                          = Types.DEFAULT_SMORFCNN_DROPOUT,
         classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
         classifierOutput: int                   = Types.DEFAULT_SMORFCNN_CLASSIFIER_OUTPUT,
+        learningRate: float                     = Types.DEFAULT_SMORFCNN_LEARNING_RATE,
+        weightDecay: float                      = Types.DEFAULT_SMORFCNN_WEIGHT_DECAY,
+        eps: float                              = Types.DEFAULT_SMORFCNN_EPS,
+        betas: tuple                            = Types.DEFAULT_SMORFCNN_BETAS,
+        factor: float                           = Types.DEFAULT_SMORFCNN_FACTOR,
+        patience: int                           = Types.DEFAULT_SMORFCNN_PATIENCE,
+        minLearningRate: float                  = Types.DEFAULT_SMORFCNN_MINIMUM_LEARNING_RATE,
         threshold: float                        = Types.DEFAULT_SMORFCNN_THRESHOLD,
         seed: int                               = Types.DEFAULT_SMORFCNN_SEED,
         deterministic: bool                     = Types.DEFAULT_SMORFCNN_DETERMINISTIC,
@@ -420,6 +427,13 @@ class SmORFCNN(nn.Module):
         self.dropout = dropout
         self.classes = classes
         self.classifierOutput = classifierOutput
+        self.learningRate = learningRate
+        self.weightDecay = weightDecay
+        self.eps = eps
+        self.betas = betas
+        self.factor = factor
+        self.patience = patience
+        self.minLearningRate = minLearningRate
         self.threshold = threshold
         self.trainBatchSize = trainBatchSize
         self.validationBatchSize = valBatchSize
@@ -428,6 +442,9 @@ class SmORFCNN(nn.Module):
         self.validationSplit = valSplit
         self.testSplit = testSplit
         self.epochs = epochs
+
+        self.optimizer = self._optimizerInit()
+        self.scheduler = self._schedulerInit()
 
         self.onehotMultiKernelClass = None
         self.onehotTemporalClass = None
@@ -505,6 +522,39 @@ class SmORFCNN(nn.Module):
         poolingNoTemporalDim = (1 - self.temporalHead) * 2 * (self.embeddingsInputChannels + self.onehotInputChannels)
 
         return temporalHeadDim + multiKernelDim + poolingNoTemporalDim
+    
+    def _optimizerInit(self) -> torch.optim.Optimizer:
+        """
+        AdamW with a common param-group trick:
+        - decay on weights of conv/linear
+        - NO decay on biases and norm parameters (1D parameters)
+        """
+
+        decay, noDecay = [], []
+        for name, param in self.named_parameters():
+            if not param.requires_grad:
+                continue
+            if param.ndim == 1 or name.endswith(".bias"):
+                noDecay.append(param)     # norms & biases
+            else:
+                decay.append(param)        # weight matrices/kernels
+
+        parameterGroups = [
+            {"params": decay,    "weight_decay": self.weightDecay},
+            {"params": noDecay, "weight_decay": 0.0},
+        ]
+
+        return torch.optim.AdamW(parameterGroups, lr=self.learningRate, betas=self.betas, eps=self.eps)
+    
+    def _schedulerInit(self) -> torch.optim.lr_scheduler:
+
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode="min",
+            factor=self.factor,
+            patience=self.patience,
+            min_lr=self.minLearningRate,
+        )        
 
     def forward(
         self,
@@ -589,7 +639,6 @@ class SmORFCNN(nn.Module):
             self,
             trainingData: DataLoader,
             epochIndex: int,
-            optimizer: torch.optim.Optimizer,
             maxGradNorm: float      = Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
             threshold: float        = Types.DEFAULT_SMORFCNN_THRESHOLD
         ) -> dict:
@@ -627,7 +676,7 @@ class SmORFCNN(nn.Module):
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
 
-            optimizer.zero_grad()
+            self.optimizer.zero_grad()
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
 
@@ -637,7 +686,7 @@ class SmORFCNN(nn.Module):
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
 
-            optimizer.step()
+            self.optimizer.step()
 
             batchSize = y.size(0)
             n += batchSize
@@ -801,8 +850,6 @@ class SmORFCNN(nn.Module):
         trainingDataloader:     DataLoader,
         validationDataloader:   DataLoader,
         epochs:                 int,
-        optimizer:              torch.optim.Optimizer,
-        scheduler:              torch.optim.lr_scheduler._LRScheduler | None = None,
     ):
         """
         Train the model for `epochs` using train/val loaders and return a training history dict.
@@ -862,7 +909,6 @@ class SmORFCNN(nn.Module):
             epochTrainMetrics = self.trainEpoch(
                 trainingData=trainingDataloader,
                 epochIndex=epoch,
-                optimizer=optimizer,
                 maxGradNorm=Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
                 threshold=self.threshold,
             )
@@ -877,10 +923,10 @@ class SmORFCNN(nn.Module):
                 # Many schedulers expect .step() AFTER val metrics (e.g., ReduceLROnPlateau uses val loss)
                 # If you use ReduceLROnPlateau, call as: scheduler.step(val_metrics["loss"])
 
-            if isinstance(scheduler, lrScheduler.ReduceLROnPlateau):
-                scheduler.step(validationMetrics["loss"])
+            if isinstance(self.scheduler, lrScheduler.ReduceLROnPlateau):
+                self.scheduler.step(validationMetrics["loss"])
             else:
-                scheduler.step()
+                self.scheduler.step()
 
             for key in epochTrainMetrics:
                 trainingMetrics[key].append(epochTrainMetrics[key])
@@ -888,7 +934,7 @@ class SmORFCNN(nn.Module):
             for key in epochValMetrics:
                 validationMetrics[key].append(epochValMetrics[key])
 
-            epochLR = optimizer.param_groups[0]["lr"]
+            epochLR = self.optimizer.param_groups[0]["lr"]
             validationMetrics["learningRate"].append(epochLR)
 
             # ---- 5) Save best-by-val-F1 weights ----
@@ -998,9 +1044,7 @@ class SmORFCNN(nn.Module):
             _ = self.fit(
                 trainLoader=trainDataloader,
                 valLoader=validationDataloader,
-                epochs=self.epochs,
-                optimizer=optimizer,
-                scheduler=scheduler
+                epochs=self.epochs
             )
 
             # Final metrics on this fold's validation split
