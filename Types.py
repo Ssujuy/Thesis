@@ -19,6 +19,7 @@ DEFAULT_DNABERT6_EPOCHS:                    int         = 4
 DEFAULT_DNABERT6_BATCH_SIZE:                int         = 16
 DEFAULT_DNABERT6_WEIGHT_DECAY:              float       = 0.01
 DEFAULT_DNABERT6_WARMUP_RATIO:              float       = 0.2
+DEFAULT_DNABER6_TEST_SPLIT:                 float       = 0.2
 DEFAULT_DNABERT6_DEVICE:                    str         = "cuda" if torch.cuda.is_available() else "cpu"
 DEFAULT_DNABER6_SAVE_DIRECTORY:             str         = "dnabert6_smorfs_ft"
 DEFAULT_DNABERT6_STRATEGY:                  str         = "epoch"
