@@ -50,9 +50,9 @@ class ConvolutionBlock(nn.Module):
         self.activation = activation
         self.dropout = dropout
 
-        if padding is None:
+        if self.padding is None:
             # "Same" padding for odd kernels under given dilation.
-            padding = (dilation * (kernel - 1)) // 2
+            self.padding = (dilation * (kernel - 1)) // 2
 
         self.conv1d = nn.Conv1d(
             self.inputChannels,
@@ -278,7 +278,7 @@ class TemporalHead(nn.Module):
             
             blocks.append(
                 ResidualBlock(
-                    self.inputChannels,
+                    self.hiddenChannels,
                     self.hiddenChannels,
                     self.kernelResidual,
                     stride=self.stride,
@@ -395,15 +395,16 @@ class SmORFCNN(nn.Module):
         self.deterministic = deterministic
         self.device = device
         self.featuresPath = featuresPath
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
-        os.environ["PYTHONHASHSEED"] = str(seed)
-        random.seed(seed)
-        np.random.seed(seed)
+        os.environ["PYTHONHASHSEED"] = str(self.seed)
+        random.seed(self.seed)
+        np.random.seed(self.seed)
 
-        torch.manual_seed(seed)
+        torch.manual_seed(self.seed)
         if self.device == 'cuda':
-            torch.cuda.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
+            torch.cuda.manual_seed(self.seed)
+            torch.cuda.manual_seed_all(self.seed)
 
         if self.deterministic:
             # Make ops deterministic where possible
@@ -515,14 +516,29 @@ class SmORFCNN(nn.Module):
         Helpers.printDataloader("Validation", self.validationDataLoader)
         Helpers.printDataloader("Testing", self.testDataLoader)
 
-    def _calculateFusedDim(self) -> int:
+        Helpers.plotLabelDistribution(self.trainDataLoader, self.validationDataLoader, self.testDataLoader)
 
-        temporalHeadDim = 4 * int(self.temporalHead) * self.temporalHeadOutputChannels
-        multiKernelDim = int(self.multiKernel) * (len(self.onehotKernelList) + len(self.embeddingsKernelList)) * self.outputChannelsKernel
-        poolingNoTemporalDim = (1 - self.temporalHead) * 2 * (self.embeddingsInputChannels + self.onehotInputChannels)
+    def _calculateFusedDim(self) -> int:
+        # If TemporalHead is ON, each branch outputs 2*hidden → two branches = 4*hidden.
+        temporalHeadDim = (4 * self.temporalHeadOutputChannels) * int(self.temporalHead)
+
+        # When TemporalHead is OFF, we pool directly. Each branch contributes 2*C_branch,
+        # where C_branch is MultiKernel out_ch if multiKernel=True, else the raw input channels.
+        if self.temporalHead:
+            poolingNoTemporalDim = 0
+        else:
+            onehot_ch = (self.onehotMultiKernelClass.outputChannels
+                            if self.multiKernel else self.onehotInputChannels)
+            embed_ch  = (self.embeddingsMultiKernelClass.outputChannels
+                            if self.multiKernel else self.embeddingsInputChannels)
+            poolingNoTemporalDim = 2 * (onehot_ch + embed_ch)
+
+        # Do NOT add MultiKernel channels separately when TemporalHead is ON;
+        # they’re already reduced inside the head. (Avoid double counting.)
+        multiKernelDim = 0
 
         return temporalHeadDim + multiKernelDim + poolingNoTemporalDim
-    
+
     def _optimizerInit(self) -> torch.optim.Optimizer:
         """
         AdamW with a common param-group trick:
@@ -593,7 +609,7 @@ class SmORFCNN(nn.Module):
         if self.temporalHead:
             inputOneHot = self.onehotTemporalClass(inputOneHot, maskOnehot)
             
-        else:
+        else:     
 
             inputOneHot = torch.cat(
                 [
@@ -611,20 +627,19 @@ class SmORFCNN(nn.Module):
 
         if self.temporalHead:
             inputEmbeddings = self.embeddingsTemporalClass(inputEmbeddings, maskEmbeddings)
-            
+
         else:
-            
             inputEmbeddings = torch.cat([
                     Helpers.globalMaxPooling(inputEmbeddings, maskEmbeddings),
                     Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
                 dim=1
             )
-                
+
         features.append(inputEmbeddings)
-        
+
         if not features:
             raise RuntimeError("Failed to produce any features!")
-        
+
         fused = features[0] if len(features) == 1 else torch.cat(features, dim=1)
 
         if fused.size(1) != self.fusedDim:
@@ -633,7 +648,6 @@ class SmORFCNN(nn.Module):
         logits = self.classifier(fused)
 
         return logits.squeeze(-1) if self.classes == 1 else logits
-
 
     def trainEpoch(
             self,
@@ -680,9 +694,10 @@ class SmORFCNN(nn.Module):
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
 
-            lossFunction(outputs, y.float())
+            loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
-            lossFunction.backward()
+
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
 
@@ -690,9 +705,9 @@ class SmORFCNN(nn.Module):
 
             batchSize = y.size(0)
             n += batchSize
-            runningLoss += lossFunction.item() * batchSize
-            probabilities.append(probs.detach())
-            targets.append(y.detach())
+            runningLoss += loss.item() * batchSize
+            probabilities.append(probs.detach().view(-1).cpu())
+            targets.append(y.detach().long().view(-1).cpu())
 
             if 'tqdm' in locals():
                 iterator.set_postfix(loss=runningLoss / n)
@@ -745,12 +760,12 @@ class SmORFCNN(nn.Module):
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
 
-            lossFunction(outputs, y.float())
+            loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
 
             batchSize = y.size(0)
             n += batchSize
-            runningLoss += lossFunction.item() * batchSize
+            runningLoss += loss.item() * batchSize
             probabilities.append(probs.detach())
             targets.append(y.detach())
 
@@ -813,12 +828,12 @@ class SmORFCNN(nn.Module):
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
 
-            lossFunction(outputs, y.float())
+            loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
 
             batchSize = y.size(0)
             n += batchSize
-            runningLoss += lossFunction.item() * batchSize
+            runningLoss += loss.item() * batchSize
             probabilities.append(probs.detach())
             targets.append(y.detach()) 
 
@@ -904,7 +919,7 @@ class SmORFCNN(nn.Module):
             leave=True
         )
 
-        for epoch in epochIter:
+        for epoch,_ in epochIter:
 
             epochTrainMetrics = self.trainEpoch(
                 trainingData=trainingDataloader,
@@ -916,7 +931,7 @@ class SmORFCNN(nn.Module):
             epochValMetrics = self.validateEpoch(
                 validationData=validationDataloader,
                 epochIndex=epoch,
-                threshold=self.thre,
+                threshold=self.threshold,
             )
 
             # ---- 3) (Optional) scheduler step — typically once per epoch ----
@@ -924,7 +939,7 @@ class SmORFCNN(nn.Module):
                 # If you use ReduceLROnPlateau, call as: scheduler.step(val_metrics["loss"])
 
             if isinstance(self.scheduler, lrScheduler.ReduceLROnPlateau):
-                self.scheduler.step(validationMetrics["loss"])
+                self.scheduler.step(epochValMetrics["loss"])
             else:
                 self.scheduler.step()
 
@@ -938,8 +953,8 @@ class SmORFCNN(nn.Module):
             validationMetrics["learningRate"].append(epochLR)
 
             # ---- 5) Save best-by-val-F1 weights ----
-            if validationMetrics["f1"] > bestF1:
-                bestF1 = validationMetrics["f1"]
+            if validationMetrics["f1"][epoch - 1] > bestF1:
+                bestF1 = validationMetrics["f1"][epoch - 1]
                 bestEpoch = epoch
                 # Keep a CPU copy; avoids GPU memory bloat and is device-agnostic to reload
                 bestState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
@@ -962,7 +977,7 @@ class SmORFCNN(nn.Module):
 
         Helpers.plotFitCurves(trainingMetrics, validationMetrics)
 
-        Helpers.plotROCCurve(testMetrics, bestEpoch)
+        Helpers.plotROCCurve(validationMetrics, bestEpoch)
 
         Helpers.plotConfusionPie(trainingMetrics, validationMetrics, testMetrics, epochs)
 
@@ -1083,5 +1098,10 @@ class SmORFCNN(nn.Module):
         return
     
 
-mymodel = SmORFCNN(512,768,"features.pt")
+mymodel = SmORFCNN(4,768,"features.pt")
 mymodel.initializeDataset()
+mymodel.fit(
+    mymodel.trainDataLoader,
+    mymodel.validationDataLoader,
+    10
+)

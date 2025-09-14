@@ -543,16 +543,17 @@ def computeEpochROC(
         {"auc", "tpr", "fpr"}.
     """
 
-    probabilities = probabilities.detach().cpu().numpy().astype(np.float64)
-    targets = targets.detach().cpu().numpy().astype(np.int32)
+    probabilities = probabilities.detach().view(-1).cpu().numpy().astype(np.float64)
+    targets = targets.detach().view(-1).cpu().numpy().astype(np.int32)
+
+    positives = (targets == 1).sum()
+    negatives = (targets == 0).sum()
 
     order = np.argsort(-probabilities)
-    sorted = targets[order]
-    positives = (sorted == 1).sum()
-    negatives = (sorted == 0).sum()
+    ySorted = targets[order]
 
-    truePositive = int(np.cumsum(sorted == 1))
-    falsePositive = int(np.cumsum(sorted == 0))
+    truePositive = np.cumsum(ySorted == 1)
+    falsePositive = np.cumsum(ySorted == 0)
     truePositiveRatio = truePositive / positives
     falsePositiveRatio = falsePositive / negatives
 
@@ -622,9 +623,9 @@ def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     epochIndex : int
         Current epoch.
     """
-    df = pd.DataFrame(metrics)
+    df = pd.DataFrame([metrics])
     print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
-    print(df)
+    print(df.to_string(index=False))
 
 def printEpochAUC(auc: dict, epochIndex: int) -> None:
     """
@@ -654,17 +655,15 @@ def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
     validationMetrics : dict
         Contans epoch-size lists for each metric key in validation.
     """
-    tMetricsDf  =  pd.DataFrame({
-        trainingMetrics
-    })
+    tMetricsDf = pd.DataFrame(trainingMetrics)
+    vMetricsDf = pd.DataFrame(validationMetrics)
 
-    vMetricsDf = pd.DataFrame({
-        validationMetrics
-    })
+    tMetricsDf.insert(0, "epoch", np.arange(1, len(tMetricsDf) + 1, dtype=int))
+    vMetricsDf.insert(0, "epoch", np.arange(1, len(vMetricsDf) + 1, dtype=int))
 
     print("Summary of Metrics computed during Fit")
-    print(tMetricsDf)
-    print(vMetricsDf)
+    print(tMetricsDf.to_string(index=False))
+    print(vMetricsDf.to_string(index=False))
 
 def printKFoldMetrics(
     foldMetrics: list,
@@ -717,9 +716,23 @@ def plotLabelDistribution(
     totalLength += len(validationDataLoader.dataset)
     totalLength += len(testDataLoader.dataset)
 
-    yTrain = trainDataLoader.dataset["y"].view(-1).cpu()
-    yVal = validationDataLoader.dataset["y"].view(-1).cpu()
-    yTest = testDataLoader.dataset["y"].view(-1).cpu()
+    ds = trainDataLoader.dataset
+    base = getattr(ds, "dataset", ds)
+    idx = getattr(ds, "indices", torch.arange(len(base)))
+    idx = torch.as_tensor(idx, dtype=torch.long)
+    yTrain = base.tensors[-1].index_select(0, idx).view(-1).cpu()
+
+    ds = validationDataLoader.dataset
+    base = getattr(ds, "dataset", ds)
+    idx = getattr(ds, "indices", torch.arange(len(base)))
+    idx = torch.as_tensor(idx, dtype=torch.long)
+    yVal = base.tensors[-1].index_select(0, idx).view(-1).cpu()
+
+    ds = testDataLoader.dataset
+    base = getattr(ds, "dataset", ds)
+    idx = getattr(ds, "indices", torch.arange(len(base)))
+    idx = torch.as_tensor(idx, dtype=torch.long)
+    yTest = base.tensors[-1].index_select(0, idx).view(-1).cpu()
 
     totalPositiveTrain = int((yTrain == 1).sum().item())
     totalPositiveVal = int((yVal == 1).sum().item())
@@ -736,11 +749,12 @@ def plotLabelDistribution(
     positives = [totalPositiveTrain, totalPositiveVal, totalPositiveTest]
 
     x = np.arange(len(splits), dtype=float)
-    width = 0.4
+    width = 0.38
+    gap = 0.08
 
     fig1 = plt.figure()
-    plt.bar(x - width/2, negatives, width=width, label="Label 0 (Non-coding)")
-    plt.bar(x + width/2, positives, width=width, label="Label 1 (Coding)")
+    plt.bar(x - (width/2 + gap/2), negatives, width=width, label="Label 0 (Non-coding)")
+    plt.bar(x + (width/2 + gap/2), positives, width=width, label="Label 1 (Coding)")
     plt.xticks(x, splits)
     plt.ylabel("count")
     plt.title("Label distribution per split")
@@ -750,7 +764,7 @@ def plotLabelDistribution(
     totalNegative = int(totalLength - totalPositive)
 
     fig2 = plt.figure()
-    plt.bar(["Label 0 (Non-Coding)", "Label 1 (Coding)"], [totalNegative, totalPositive])
+    plt.bar(["Label 0 (Non-Coding)", "Label 1 (Coding)"], [totalNegative, totalPositive], width=0.4)
     plt.ylabel("count")
     plt.title("Label distribution (all splits combined)")
     plt.tight_layout()
@@ -783,9 +797,9 @@ def plotConfusionPie(
     epochs : int
         Total epochs of fit.
     """
-    TP,TN,FP,FN,total = 0
+    TP,TN,FP,FN,total = 0,0,0,0,0
 
-    for epoch in epochs:
+    for epoch in range(0, epochs):
         TP += trainingMetrics["TP"][epoch] + validationMetrics["TP"][epoch]
         TN += trainingMetrics["TN"][epoch] + validationMetrics["TN"][epoch]
         FP += trainingMetrics["FP"][epoch] + validationMetrics["FP"][epoch]
@@ -826,20 +840,21 @@ def plotFitCurves(
     Contans epoch-size lists for each metric key in validation.
     """
     epochs = len(trainingMetrics["loss"])
+    x = np.arange(1, epochs + 1)
 
     fig1 = plt.figure()
-    plt.plot(epochs, trainingMetrics["loss"], label="Training Loss")
-    plt.plot(epochs, validationMetrics["loss"],   label="Validation Loss")
+    plt.plot(x, trainingMetrics["loss"], label="Training Loss")
+    plt.plot(x, validationMetrics["loss"], label="Validation Loss")
     plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title("Loss"); plt.legend()
 
     fig2 = plt.figure()
-    plt.plot(epochs, trainingMetrics["acc"], label="Training Accuracy")
-    plt.plot(epochs, validationMetrics["acc"], label="Validation Accuracy")
+    plt.plot(x, trainingMetrics["acc"], label="Training Accuracy")
+    plt.plot(x, validationMetrics["acc"], label="Validation Accuracy")
     plt.xlabel("Epoch"); plt.ylabel("Accuracy"); plt.title("Accuracy"); plt.legend()
 
     fig3 = plt.figure()
-    plt.plot(epochs, trainingMetrics["f1"], label="Training F1")
-    plt.plot(epochs, validationMetrics["f1"], label="Validation F1")
+    plt.plot(x, trainingMetrics["f1"], label="Training F1")
+    plt.plot(x, validationMetrics["f1"], label="Validation F1")
     plt.xlabel("Epoch"); plt.ylabel("F1"); plt.title("F1"); plt.legend()
 
     plt.show()
@@ -862,9 +877,9 @@ def plotROCCurve(validationMetrics: dict, epoch: int):
     if epoch == 0 or epoch is None:
         raise ValueError("Epoch must have an integer value > 0")
 
-    fpr = np.asarray(validationMetrics[epoch - 1].get("fpr", []), dtype=float)
-    tpr = np.asarray(validationMetrics[epoch - 1].get("tpr", []), dtype=float)
-    auc = float(validationMetrics[epoch - 1].get("auc"))
+    fpr = np.asarray(validationMetrics.get("fpr", []), dtype=float)[epoch - 1]
+    tpr = np.asarray(validationMetrics.get("tpr", []), dtype=float)[epoch - 1]
+    auc = float(validationMetrics.get("auc")[epoch - 1])
 
     fig = plt.figure()
     plt.plot(fpr, tpr, label=f"AUC = {auc:.3f}")
@@ -875,7 +890,6 @@ def plotROCCurve(validationMetrics: dict, epoch: int):
     plt.show()
 
     return fig
-
 
 def plotMeanROC(
     foldMetrics: list,
