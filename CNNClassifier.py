@@ -12,18 +12,67 @@ from sklearn.model_selection import StratifiedKFold
 
 class ConvolutionBlock(nn.Module):
     """
-    Conv1d -> BatchNorm -> GELU -> (Dropout)
-    - BatchNorm stabilizes training
-    - GELU is a strong modern activation
+    Constructs a basic Convolution Network with configurable parameters:\n
+    kernel, stride, padding, dilation, groups, activation and dropout
 
-    Where:
-    1. kernel: number of adjacent positiona single filter looks at.
-    2. stride: how far the kernel moves during each step.
-    3. padding: ensures edge positions get full windows and layer shapes stay compatible.
-    4. dilation: spacing between kernel taps.
-    5. groups: splits the inputChannels in groups and applies independent filters.
-    6. activation: activation function to use, configurable for testing.
-    7. dropout: zeros activations to reduce co-adaptation and overfitting
+    Attributes
+    ----------
+    forwardDebugOnce : bool
+        Ensures forward will only print logs once to avoid overflowing output
+
+    debugMode : bool
+        Turns debug mode on when true (more information).
+
+    inputChannels: int
+        Size of input
+
+    outputChannels: int
+        Size of output.
+
+    kernel : int
+        Number of adjacent positions a single filter looks at.
+
+    stride : int
+        How far the kernel moves during each step.
+
+    padding : int
+        Ensures edge positions get full windows and layer shapes stay compatible.
+
+    dilation : int
+        Spacing between kernel taps.
+
+    groups : int
+        Splits the inputChannels in groups and applies independent filters.
+
+    activation : str
+        Activation function to use, configurable for testing.
+
+    dropout : float
+        Zeros activations to reduce co-adaptation and overfitting.    
+    
+    conv1d : nn.Conv1d
+        Convolution Conv1d from pyTorch.
+
+    batchNormalization : nn.BatchNorm1d
+        Batch Normalization.
+
+    activation : nn
+        Activation Function.
+
+    modelParams : int
+        Total of model's parameters.
+
+    modelTrainableParams : int
+        Total of model's trainable parameters, requires gradient.
+
+    Methods
+    ----------
+    forward(x : Tensor) -> Tensor:
+        Passes input x through convolution, batch normalization, activation and dropout.\n
+        Returns a Tensor with the output of size outputChannels.
+
+    print():
+        Prints member variables of the class and number of model parameters and trainable model parameters.
     """
 
     def __init__(
@@ -40,6 +89,41 @@ class ConvolutionBlock(nn.Module):
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
+        """
+        Constructs Conv1d, BatchNormalization, acvtivation function and dropout.
+
+        Parameters
+        ----------
+        inputChannels: int
+            Size of input.
+
+        outputChannels: int
+            Size of output.
+
+        kernel : int
+            Number of adjacent positions a single filter looks at.
+
+        stride : int
+            How far the kernel moves during each step.
+
+        padding : int
+            Ensures edge positions get full windows and layer shapes stay compatible.
+
+        dilation : int
+            Spacing between kernel taps.
+
+        groups : int
+            Splits the inputChannels in groups and applies independent filters.
+
+        activation : str
+            Activation function to use, configurable for testing.
+
+        dropout : float
+            Zeros activations to reduce co-adaptation and overfitting.
+
+        debug : bool
+            Turns debug mode on when true (more information).
+        """
 
         self.forwardDebugOnce = debug
         self.debugMode = debug
@@ -54,8 +138,7 @@ class ConvolutionBlock(nn.Module):
         self.dropout = dropout
 
         if self.padding is None:
-            # "Same" padding for odd kernels under given dilation.
-            self.padding = (dilation * (kernel - 1)) // 2
+            self.padding = (dilation * (kernel - 1)) // 2       # "Same" padding for odd kernels under given dilation.
 
         self.conv1d = nn.Conv1d(
             self.inputChannels,
@@ -72,7 +155,24 @@ class ConvolutionBlock(nn.Module):
         self.activation = Types.activationFunctionMapping.get(activation)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
+        self.modelParams = sum(p.numel() for p in self.parameters())
+        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Passes input x through convolution, batch normalization, activation and dropout.\n
+        Returns a Tensor with the output of size outputChannels.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.
+
+        Return
+        ----------
+        x : Tensor
+            Output Tensor after convolution, batch normalization, activation and dropout.
+        """
 
         self._debugIn(x)
         x = self.conv1d(x)
@@ -83,6 +183,9 @@ class ConvolutionBlock(nn.Module):
         return x
 
     def print(self) -> None:
+        """
+        Prints member variables of the class and number of model parameters and trainable model parameters.
+        """
 
         print("Convolution Block Parameters:")
         print(f" - Input Channels: {self.inputChannels}")
@@ -93,23 +196,99 @@ class ConvolutionBlock(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
-        print(f" - Model Parameters: {self.dropout}")
+        print(f" - Model Parameters: {self.modelParams}")
+        print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
-    def _debugIn(self,x):
+    def _debugIn(self, x: torch.Tensor) -> None:
+        """
+        Prints debug information for input shape and type in forward. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.        
+        """
+
         if self.forwardDebugOnce and self.debugMode:
-            print(f"[ConvolutionBlock] in shape={tuple(x.shape)} dtype={x.dtype} device={x.device} "
+            print(f"[ConvolutionBlock] in shape={tuple(x.shape)} dtype={x.dtype} device={x.device}"
             f"min={x.detach().min().item():.4f} max={x.detach().max().item():.4f} mean={x.detach().float().mean().item():.4f}")
 
-    def _debugOut(self,x):
+    def _debugOut(self, x: torch.Tensor) -> None:
+        """
+        Prints debug information for output shape in forward. Only works once for forward and when debugMode is True.\n
+        Toggles forwardDebugOnce attribute, to only run once.
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.        
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[ConvolutionBlock] out shape={tuple(x.shape)}")
             self.forwardDebugOnce = False
     
 class ResidualBlock(nn.Module):
     """
-    Defining 2 Convolution Block classes. This class computes a residual mapping
+    Defining 2 Convolution Block classes. This class computes a residual mapping\n
     y = x + F(x) introduced by ResNets. inputChannels length is equal to output channels length.
+
+    Attributes
+    ----------
+    forwardDebugOnce : bool
+        Ensures forward will only print logs once to avoid overflowing output
+
+    debugMode : bool
+        Turns debug mode on when true (more information).
+
+    inputChannels: int
+        Size of input
+
+    outputChannels: int
+        Size of output.
+
+    kernel : int
+        Number of adjacent positions a single filter looks at.
+
+    stride : int
+        How far the kernel moves during each step.
+
+    padding : int
+        Ensures edge positions get full windows and layer shapes stay compatible.
+
+    dilation : int
+        Spacing between kernel taps.
+
+    groups : int
+        Splits the inputChannels in groups and applies independent filters.
+
+    activation : str
+        Activation function to use, configurable for testing.
+
+    dropout : float
+        Zeros activations to reduce co-adaptation and overfitting.    
+    
+    convolution1 : ConvolutionBlock
+        First Convolution block to compute convolution1(x).
+
+    convolution2 : ConvolutionBlock
+        Second Convolution Block to compute convolution2(convolution1(x)).
+
+    modelParams : int
+        Total of model's parameters.
+
+    modelTrainableParams : int
+        Total of model's trainable parameters, requires gradient.
+
+    Methods
+    ----------
+    forward(x : Tensor) -> Tensor:
+        Passes input x through convolution, batch normalization, activation and dropout.\n
+        Returns a Tensor with the output of size outputChannels.
+
+    print():
+        Prints member variables of the class and number of model parameters and trainable model parameters.
     """
+
     def __init__(
             self,
             inputChannels: int,
@@ -124,6 +303,41 @@ class ResidualBlock(nn.Module):
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
+        """
+        Constructs 2 Convolution Block classes for Residual Mapping and initializes member variables.
+
+        Parameters
+        ----------
+        inputChannels: int
+            Size of input.
+
+        outputChannels: int
+            Size of output.
+
+        kernel : int
+            Number of adjacent positions a single filter looks at.
+
+        stride : int
+            How far the kernel moves during each step.
+
+        padding : int
+            Ensures edge positions get full windows and layer shapes stay compatible.
+
+        dilation : int
+            Spacing between kernel taps.
+
+        groups : int
+            Splits the inputChannels in groups and applies independent filters.
+
+        activation : str
+            Activation function to use, configurable for testing.
+
+        dropout : float
+            Zeros activations to reduce co-adaptation and overfitting.
+
+        debug : bool
+            Turns debug mode on when true (more information).
+        """
 
         self.debugMode = debug
         self.forwardDebugOnce = debug
@@ -161,13 +375,34 @@ class ResidualBlock(nn.Module):
             dropout=self.dropout
         )
 
+        self.modelParams = sum(p.numel() for p in self.parameters())
+        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Computes Residual mapping. First computes convolution1(x), then convolution2(convolution1(x))\n
+        and finally x + convolution2(convolution1(x)). Then returns the output.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.
+
+        Return
+        ----------
+        out : Tensor
+            Output Tensor after Residual Mapping.
+        """
+
         self._debugIn(x)
         out = x + self.convolution2(self.convolution1(x))
         self._debugOut(out)
         return out
 
     def print(self) -> None:
+        """
+        Prints member variables of the class and number of model parameters and trainable model parameters.
+        """
 
         print("Residual Block Parameters:")
         print(f" - Input Channels: {self.inputChannels}")
@@ -178,22 +413,94 @@ class ResidualBlock(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
-        print(f" - Model Parameters: {self.activation}")
+        print(f" - Model Parameters: {self.modelParams}")
+        print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
-    def _debugIn(self,x):
+    def _debugIn(self, x: torch.Tensor) -> None:
+        """
+        Prints shape of input Tensor in forward. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.        
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[ResidualBlock] in shape={tuple(x.shape)}")
 
-    def _debugOut(self,out):
+    def _debugOut(self, out: torch.Tensor) -> None:
+        """
+        Prints shape of output Tensor in forward. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.        
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[ResidualBlock] out shape={tuple(out.shape)}")
             self.forwardDebugOnce = False
 
 class MultiKernelConvolution(nn.Module):
     """
-    Parallel convs with different kernel widths (e.g., 3/7/11/15)
-    Captures short motifs (codons, start/stop) and longer context.
+    Parallel Convolution Bloks with different kernel widths, to capture short motifs (codons, start/stop) and longer context.
+
+    Attributes
+    ----------
+    forwardDebugOnce : bool
+        Ensures forward will only print logs once to avoid overflowing output
+
+    debugMode : bool
+        Turns debug mode on when true (more information).
+
+    inputChannels: int
+        Size of input
+
+    outputChannelsKernel: int
+        Size of output channels per kernel.
+
+    kernelList : list
+        A list of different sized kernels.
+
+    stride : int
+        How far the kernel moves during each step.
+
+    padding : int
+        Ensures edge positions get full windows and layer shapes stay compatible.
+
+    dilation : int
+        Spacing between kernel taps.
+
+    groups : int
+        Splits the inputChannels in groups and applies independent filters.
+
+    activation : str
+        Activation function to use, configurable for testing.
+
+    dropout : float
+        Zeros activations to reduce co-adaptation and overfitting.    
+
+    branches : ModuleList
+        List of Convolution Blocks with different kernel value, with length equal to kernelList length.
+
+    modelParams : int
+        Total of model's parameters.
+
+    modelTrainableParams : int
+        Total of model's trainable parameters, requires gradient.
+
+    Methods
+    ----------
+    forward(x : Tensor) -> Tensor:
+        Passes input x through convolution, batch normalization, activation and dropout.\n
+        Returns a Tensor with the output of size outputChannels.
+
+    print():
+        Prints member variables of the class and number of model parameters and trainable model parameters.
     """
+
     def __init__(
             self,
             inputChannels: int,
@@ -208,6 +515,41 @@ class MultiKernelConvolution(nn.Module):
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
+        """
+        Constructs List of Convolution Blocks to draw features with different kernel sizes and initializes member variables.
+
+        Parameters
+        ----------
+        inputChannels: int
+            Size of input.
+
+        outputChannelsKernel: int
+            Size of output for each kernel.
+
+        kernelList : list
+            Number of adjacent positions a single filter looks at.
+
+        stride : int
+            How far the kernel moves during each step.
+
+        padding : int
+            Ensures edge positions get full windows and layer shapes stay compatible.
+
+        dilation : int
+            Spacing between kernel taps.
+
+        groups : int
+            Splits the inputChannels in groups and applies independent filters.
+
+        activation : str
+            Activation function to use, configurable for testing.            
+
+        dropout : float
+            Zeros activations to reduce co-adaptation and overfitting.
+
+        debug : bool
+            Turns debug mode on when true (more information).
+        """
 
         self.debugMode = debug
         self.forwardDebugOnce = debug
@@ -239,18 +581,43 @@ class MultiKernelConvolution(nn.Module):
         
         self.outputChannels = outputChannelsKernel * len(kernelList)
 
+        self.modelParams = sum(p.numel() for p in self.parameters())
+        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Compute convolution and draw features for each Convolution Block in branches,\n
+        then concatenate its outputs and return them.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.
+
+        Return
+        ----------
+        out : Tensor
+            Output Tensor after Residual Mapping.
+        """
 
         output = []
+
+        self._debugIn(x)
 
         for branch in self.branches:
             b = branch(x)
             output.append(b)
 
+            self._debugBranch(b)
+
         out = torch.cat(output, dim=1)
+        self._debugOut(out)
         return out
 
     def print(self) -> None:
+        """
+        Prints member variables of the class and number of model parameters and trainable model parameters.
+        """
 
         print("Multiple Kernel Convolution Parameters:")
         print(f" - Input Channels: {self.inputChannels}")
@@ -262,25 +629,115 @@ class MultiKernelConvolution(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
-        print(f" - Model Parameters: {self.dropout}")
+        print(f" - Model Parameters: {self.modelParams}")
+        print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
     
     def _debugIn(self,x):
+        """
+        Prints shape of input Tensor in forward and kernel list of model. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.        
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[MultiKernelConv] in shape={tuple(x.shape)} kernels={self.kernelList}")
 
     def _debugBranch(self,b):
+        """
+        Prints shape of each branche's Tensor in forward. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        b : Tensor
+            Input Tensor.        
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[MultiKernelConv] out shape={tuple(b.shape)}")
 
-    def _debugOut(self,out):
+    def _debugOut(self, out: torch.Tensor) -> None:
+        """
+        Prints shape of output Tensor in forward. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        out : Tensor
+            Input Tensor.        
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[MultiKernelConv] concat out shape={tuple(out.shape)}")
+            self.forwardDebugOnce = False
 
 class TemporalHead(nn.Module):
     """
-    Reduce channels -> residual stack -> masked global pooling (max + avg).
+    Temporal Head Class implements a size reduction of the input channel using a Convolution Block,\n
+    creates a Residual Block stack with multiple dilations and computes Global Average and Max Pooling.\n
     Assumes sequences are right-padded and `mask` marks valid positions: [B, L] with 1=valid, 0=pad.
+
+    Attributes
+    ----------
+    forwardDebugOnce : bool
+        Ensures forward will only print logs once to avoid overflowing output
+
+    debugMode : bool
+        Turns debug mode on when true (more information).
+
+    hiddenChannels: int
+        Size of reduction's output and Residual stack's output.
+
+    kernelReduction : int
+        Kernel width for reduction block.
+    
+    kernelResidual : int
+        Kernel width for residual stack.
+
+    stride : int
+        How far the kernel moves during each step.
+
+    padding : int
+        Ensures edge positions get full windows and layer shapes stay compatible.
+
+    groups : int
+        Splits the inputChannels in groups and applies independent filters.
+
+    activation : str
+        Activation function to use, configurable for testing.
+
+    dropout : float
+        Zeros activations to reduce co-adaptation and overfitting.    
+
+    multipleDilation : bool
+        Flag to activate different dilations for each Residual stack item.
+
+    residualBlocks : int
+        Number of Residual Blocks included in the Residucal stack.
+
+    reduce : ConvolutionBlock
+        Convolution Block used to reduce input channels.
+
+    residualBlocks : nn.Sequential
+        Stack of Residual Blocks.
+
+    modelParams : int
+        Total of model's parameters.
+
+    modelTrainableParams : int
+        Total of model's trainable parameters, requires gradient.
+
+    Methods
+    ----------
+    forward(x : Tensor) -> Tensor:
+        Passes input x through convolution, batch normalization, activation and dropout.\n
+        Returns a Tensor with the output of size outputChannels.
+
+    print():
+        Prints member variables of the class and number of model parameters and trainable model parameters.
     """
+
     def __init__(
         self,
         inputChannels,
@@ -293,10 +750,55 @@ class TemporalHead(nn.Module):
         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
         dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
         multipleDilation: bool      = Types.DEFAULT_TEMPORAL_MULTI_DILATION,
-        residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB
+        residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB,
+        debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
-        self.firsttime = True
+        """
+        Constructs a reduce Convolution Block, a stack of Residual block of size residualBlocks\n
+        and initializes member variables.
+
+        Parameters
+        ----------
+        inputChannels: int
+            Size of input.
+
+        hiddenChannels: int
+            Size of output for reduction.
+
+        kernelReduction : int
+            Kernel width for reduction block.
+        
+        kernelResidual : int
+            Kernel width for residual stack..
+
+        stride : int
+            How far the kernel moves during each step.
+
+        padding : int
+            Ensures edge positions get full windows and layer shapes stay compatible.
+
+        groups : int
+            Splits the inputChannels in groups and applies independent filters.
+
+        activation : str
+            Activation function to use, configurable for testing.            
+
+        dropout : float
+            Zeros activations to reduce co-adaptation and overfitting.
+
+        multipleDilation : bool
+            Flag to activate different dilations for each Residual stack item.
+
+        residualBlocks : int
+            Number of Residual Blocks included in the Residucal stack.
+
+        debug : bool
+            Turns debug mode on when true (more information).
+        """
+
+        self.debugMode = debug
+        self.forwardDebugOnce = debug
         self.inputChannels = inputChannels
         self.hiddenChannels = hiddenChannels
         self.kernelResidual = kernelResidual
@@ -342,7 +844,45 @@ class TemporalHead(nn.Module):
         
         self.residualBlocks = nn.Sequential(*blocks)
 
+        self.modelParams = sum(p.numel() for p in self.parameters())
+        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        x:    [B, C, L]   feature map
+        mask: [B, L]      1 for valid tokens, 0 for right-padded tail.
+
+        1. Project to 128 size
+        2. Calculate residualBlocks number of Residuals sequentially.
+        3. Calculate global max pooling and global average pooling, then concatenate.
+
+        returns: [B, 2*C] (global-max ⊕ masked-global-avg)
+        """
+        self._debugIn(x)
+
+        x = self.reduce(x)
+
+        self._debugReduce(x)
+
+        x = self.residualBlocks(x)
+
+        self._debugRes(x)
+
+        gmp = Helpers.globalMaxPooling(x, mask)
+        gap = Helpers.globalAveragePooling(x, mask)
+
+        self._debugPooling(gmp,gap)
+
+        out = torch.cat([gmp, gap], dim=1)
+
+        self._debugOut(out)
+
+        return out
+
     def print(self) -> None:
+        """
+        Prints member variables of the class and number of model parameters and trainable model parameters.
+        """
 
         print("Temporal Head Parameters:")
         print(f" - Input Channels: {self.inputChannels}")
@@ -356,42 +896,31 @@ class TemporalHead(nn.Module):
         print(f" - Dropout: {self.dropout}")
         print(f" - Change Dilation for Residual Block: {self.multipleDilation}")
         print(f" - Number of Residual blocks: {self.residualBlocks}")
+        print(f" - Model Paramters: {self.modelParams}")
+        print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
-
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """
-        x:    [B, C, L]   feature map
-        mask: [B, L]      1 for valid tokens, 0 for right-padded tail.
-
-        1. Project to 128 size
-        2. Calculate residualBlocks number of Residuals sequentially.
-        3. Calculate global max pooling and global average pooling, then concatenate.
-
-        returns: [B, 2*C] (global-max ⊕ masked-global-avg)
-        """
-        # refine features (length preserved)
-        if self.firsttime:
+    def _debugIn(self, x: torch.Tensor, mask: torch.Tensor) -> None:
+        if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] in x shape={tuple(x.shape)} mask shape={tuple(mask.shape)} "
             f"mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}")
-        x = self.reduce(x)        # [B, C, L]
-        if self.firsttime:
+    
+    def _debugReduce(self, x: torch.Tensor) -> None:
+        if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] after reduce shape={tuple(x.shape)}")
-        x = self.residualBlocks(x)        # [B, C, L]
-        if self.firsttime:    
-            print(f"[TemporalHead] after residualBlocks shape={tuple(x.shape)}")
 
-        gmp = Helpers.globalMaxPooling(x, mask)
-        gap = Helpers.globalAveragePooling(x, mask)
-        if self.firsttime:
+    def _debugRes(self, x: torch.Tensor) -> None:
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[TemporalHead] after residualBlocks shape={tuple(x.shape)}")
+    
+    def  _debugPooling(self,gmp,gap):
+        if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] GMP type={type(gmp)} shape={tuple(gmp.shape)} "
             f"GAP type={type(gap)} shape={tuple(gap.shape)}")
-        out = torch.cat([gmp, gap], dim=1)
-        if self.firsttime:
-            print(f"[TemporalHead] out shape={tuple(out.shape)}")
-        self.firsttime = False
-        return out
-
     
+    def _debugOut(self, out: torch.Tensor) -> None:
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[TemporalHead] out shape={tuple(out.shape)}")
+            self.forwardDebugOnce = False
 
 # ---------------------------------------------
 # The CNNClassifier for smORFs
@@ -449,10 +978,12 @@ class SmORFCNN(nn.Module):
         valSplit: float                         = Types.DEFAULT_SMORFCNN_VALIDATION_SPLIT,
         testSplit: float                        = Types.DEFAULT_SMORFCNN_TEST_SPLIT,
         epochs: int                             = Types.DEFAULT_SMORFCNN_EPOCHS,
-
+        debug: bool                             = Types.DEFAULT_DEBUG_MODE
     ):
         super().__init__()
-        self.firsttime = True
+
+        self.debugMode = debug
+        self.forwardDebugOnce = debug
         self.seed = seed
         self.deterministic = deterministic
         self.device = device
@@ -469,7 +1000,6 @@ class SmORFCNN(nn.Module):
             torch.cuda.manual_seed_all(self.seed)
 
         if self.deterministic:
-            # Make ops deterministic where possible
             try:
                 torch.use_deterministic_algorithms(True)
             except Exception:
@@ -554,13 +1084,11 @@ class SmORFCNN(nn.Module):
 
         self.optimizer = self._optimizerInit()
         self.scheduler = self._schedulerInit()
-        total_params = sum(p.numel() for p in self.parameters())
-        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"[INIT] total params={total_params:,} trainable={trainable_params:,}")
-        print(f"[INIT] optimizer param_groups sizes={[len(g['params']) for g in self.optimizer.param_groups]}")
-        print(f"[INIT] device={self.device} multiKernel={self.multiKernel} temporalHead={self.temporalHead}")
-        print(f"[INIT] onehot kernels={self.onehotKernelList} embed kernels={self.embeddingsKernelList}")
-        print(f"[INIT] fusedDim={self.fusedDim} classifier={self.classifier}")
+
+        self.modelParams = sum(p.numel() for p in self.parameters())
+        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+        self._debugInit()
 
         self.trainDataLoader = None
         self.validationDataLoader = None
@@ -581,40 +1109,33 @@ class SmORFCNN(nn.Module):
             self.seed
         )
 
-        # Helpers.printDataloader("Training", self.trainDataLoader)
-        # Helpers.printDataloader("Validation", self.validationDataLoader)
-        # Helpers.printDataloader("Testing", self.testDataLoader)
+        self._debugDataLoader()
 
-        # Helpers.plotLabelDistribution(self.trainDataLoader, self.validationDataLoader, self.testDataLoader)
-        try:
-            t_idx  = set(self.trainDataLoader.dataset.indices)
-            v_idx  = set(self.validationDataLoader.dataset.indices)
-            te_idx = set(self.testDataLoader.dataset.indices)
-            print(f"[SPLIT] |train|={len(t_idx)} |val|={len(v_idx)} |test|={len(te_idx)} "
-                f"overlap train∩val={len(t_idx & v_idx)} train∩test={len(t_idx & te_idx)} val∩test={len(v_idx & te_idx)}")
-        except Exception as e:
-            print(f"[SPLIT] couldn't inspect indices: {e}")
+        Helpers.printDataloader("Training", self.trainDataLoader)
+        Helpers.printDataloader("Validation", self.validationDataLoader)
+        Helpers.printDataloader("Testing", self.testDataLoader)
+
+        Helpers.plotLabelDistribution(self.trainDataLoader, self.validationDataLoader, self.testDataLoader)
 
     def _calculateFusedDim(self) -> int:
         # If TemporalHead is ON, each branch outputs 2*hidden → two branches = 4*hidden.
-        temporalHeadDim = (4 * self.temporalHeadOutputChannels) * int(self.temporalHead)
-
+        # Do NOT add MultiKernel channels separately when TemporalHead is ON;
+        # they’re already reduced inside the head. (Avoid double counting.)
         # When TemporalHead is OFF, we pool directly. Each branch contributes 2*C_branch,
         # where C_branch is MultiKernel out_ch if multiKernel=True, else the raw input channels.
+
+        temporalHeadDim = (4 * self.temporalHeadOutputChannels) * int(self.temporalHead)
+
         if self.temporalHead:
             poolingNoTemporalDim = 0
         else:
-            onehot_ch = (self.onehotMultiKernelClass.outputChannels
+            onehotChannels = (self.onehotMultiKernelClass.outputChannels
                             if self.multiKernel else self.onehotInputChannels)
-            embed_ch  = (self.embeddingsMultiKernelClass.outputChannels
+            embedChannels  = (self.embeddingsMultiKernelClass.outputChannels
                             if self.multiKernel else self.embeddingsInputChannels)
-            poolingNoTemporalDim = 2 * (onehot_ch + embed_ch)
+            poolingNoTemporalDim = 2 * (onehotChannels + embedChannels)
 
-        # Do NOT add MultiKernel channels separately when TemporalHead is ON;
-        # they’re already reduced inside the head. (Avoid double counting.)
         multiKernelDim = 0
-
-        print(f"[FUSED DIM] temporalHeadDim={temporalHeadDim} poolingNoTemporalDim={poolingNoTemporalDim} -> fusedDim={temporalHeadDim + multiKernelDim + poolingNoTemporalDim}")
 
         return temporalHeadDim + multiKernelDim + poolingNoTemporalDim
 
@@ -671,13 +1192,8 @@ class SmORFCNN(nn.Module):
         Returns:
         logits: [B] if self.classes==1 else [B, self.classes]
         """
-        if self.firsttime:
-            print(f"[SmORFCNN.forward] xOnehot shape={tuple(xOnehot.shape)} "
-                    f"min/max/mean=({xOnehot.detach().min().item():.3f}/{xOnehot.detach().max().item():.3f}/{xOnehot.detach().float().mean().item():.3f})")
-            print(f"[SmORFCNN.forward] xEmbeddings shape={tuple(xEmbeddings.shape)} "
-                    f"min/max/mean=({xEmbeddings.detach().min().item():.3f}/{xEmbeddings.detach().max().item():.3f}/{xEmbeddings.detach().float().mean().item():.3f})")
-            print(f"[SmORFCNN.forward] maskOnehot shape={tuple(maskOnehot.shape)} sum per-batch={maskOnehot.sum(dim=1).detach().cpu().tolist()[:8]}")
-            print(f"[SmORFCNN.forward] maskEmbeddings shape={tuple(maskEmbeddings.shape)} sum per-batch={maskEmbeddings.sum(dim=1).detach().cpu().tolist()[:8]}")
+        self._debugIn(xOnehot, xEmbeddings, maskOnehot, maskEmbeddings)
+
         features = []
         inputOneHot = xOnehot
         inputEmbeddings = xEmbeddings
@@ -709,10 +1225,9 @@ class SmORFCNN(nn.Module):
                     dim=1
             )  
 
-        features.append(inputOneHot)
+        self._debugOnehot(inputOneHot)
 
-        if self.firsttime:
-            print(f"[SmORFCNN.forward] onehot features shape={tuple(inputOneHot.shape)}")
+        features.append(inputOneHot)
 
         if self.multiKernel:
             if self.firsttime:
@@ -732,26 +1247,23 @@ class SmORFCNN(nn.Module):
                     Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
                 dim=1
             )
-        if self.firsttime:
-            print(f"[SmORFCNN.forward] embeddings features shape={tuple(inputEmbeddings.shape)}")
+
+        self._debugEmbeddings(inputEmbeddings)
+
         features.append(inputEmbeddings)
 
         if not features:
             raise RuntimeError("Failed to produce any features!")
 
         fused = features[0] if len(features) == 1 else torch.cat(features, dim=1)
-        if self.firsttime:
-            print(f"[SmORFCNN.forward] fused features shape={tuple(fused.shape)} (expected last dim={self.fusedDim})")
 
         if fused.size(1) != self.fusedDim:
             raise ValueError(f"Expected fused dimension {self.fusedDim} , got {fused.size(1)}")
 
         logits = self.classifier(fused)
-        if self.firsttime:
-            print(f"[SmORFCNN.forward] logits shape={tuple(logits.shape)} "
-                f"min/max/mean=({logits.detach().min().item():.3f}/{logits.detach().max().item():.3f}/{logits.detach().float().mean().item():.3f}) "
-                f"sample={logits.detach().view(-1)[:8].cpu().tolist()}")
-        self.firsttime = False
+
+        self._debugLogits(logits)
+
         return logits.squeeze(-1) if self.classes == 1 else logits
 
     def trainEpoch(
@@ -788,51 +1300,50 @@ class SmORFCNN(nn.Module):
 
         for i, batch in iterator:
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
-            if i == 0:
-                print(f"[trainEpoch e{epochIndex}] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
-                      f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
-                      f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
-                print(f"[trainEpoch e{epochIndex}] xEmbed stats: min={xEmbed.min().item():.3f} max={xEmbed.max().item():.3f} mean={xEmbed.float().mean().item():.3f} "
-                      f"len(T)={xEmbed.shape[-1]}")
+
+            self._debugInEpoch(
+                self,
+                xOnehot,
+                maskOnehot,
+                xEmbed,
+                maskEmbed,
+                y,
+                "Training",
+                i,
+                epochIndex
+            )
+
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
-            if i == 0:
-                len_oh = maskOnehot.sum(-1).float()
-                pos = (y == 1)
-                neg = ~pos
-                def _m(v): return (v.mean().item() if v.numel() > 0 else float('nan'))
-                def _s(v): return (v.std().item()  if v.numel() > 1 else float('nan'))
-                print(f"[trainEpoch e{epochIndex}] lenOH pos/neg mean={_m(len_oh[pos]):.1f}/{_m(len_oh[neg]):.1f} "
-                    f"std={_s(len_oh[pos]):.1f}/{_s(len_oh[neg]):.1f}")
+
             self.optimizer.zero_grad()
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
-            if i == 0:
-                print(f"[trainEpoch e{epochIndex}] outputs shape={tuple(outputs.shape)} "
-                      f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
+
+            self._debugOutEpoch(
+                outputs,
+                "Training",
+                i,
+                epochIndex
+            )
+
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
 
             loss.backward()
 
-            total_norm = torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
-            if i == 0:
-                print(f"[trainEpoch e{epochIndex}] total_grad_norm(before clip)={total_norm:.4f} "
-                    f"clipped={bool(total_norm > maxGradNorm)}")
-                print(f"[trainEpoch e{epochIndex}] classifier[0].weight grad |mean|="
-                    f"{self.classifier[0].weight.grad.abs().mean().item():.6f}")
+            self._debugStats(
+                probs,
+                loss,
+                maxGradNorm,
+                "Training",
+                i,
+                epochIndex
+            )
 
-            if i == 0:
-                total_norm_sq = 0.0
-                for p in self.parameters():
-                    if p.grad is not None:
-                        gn = p.grad.data.norm(2).item()
-                        total_norm_sq += gn*gn
-                print(f"[trainEpoch e{epochIndex}] grad_norm(L2)={total_norm_sq**0.5:.4f} loss={loss.item():.6f} "
-                      f"probs sample={probs.detach().view(-1)[:8].cpu().tolist()}")
             self.optimizer.step()
 
             batchSize = y.size(0)
@@ -846,8 +1357,16 @@ class SmORFCNN(nn.Module):
 
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
-        print(f"[trainEpoch e{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
-              f"loss_avg={runningLoss/max(1,n):.6f}")
+
+        self._debugFinal(
+            probabilities,
+            targets,
+            runningLoss,
+            n,
+            "Training",
+            epochIndex
+        )
+
         return Helpers.computeEpochMetrics(
             probabilities,
             targets,
@@ -856,6 +1375,7 @@ class SmORFCNN(nn.Module):
             threshold,
             epochIndex
         )
+
     @torch.no_grad()
     def validateEpoch(
             self,
@@ -883,29 +1403,34 @@ class SmORFCNN(nn.Module):
             )
 
         for j, batch in iterator:
+
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
-            if j == 0:
-                print(f"[validateEpoch e{epochIndex}] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
-                      f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
-                      f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
+
+            self._debugInEpoch(
+                xOnehot,
+                maskOnehot,
+                xEmbed,
+                maskEmbed,
+                y,
+                "Validation",
+                j,
+                epochIndex
+            )
+
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
-            if j == 0:
-                len_oh = maskOnehot.sum(-1).float()
-                pos = (y == 1)
-                neg = ~pos
-                def _m(v): return (v.mean().item() if v.numel() > 0 else float('nan'))
-                def _s(v): return (v.std().item()  if v.numel() > 1 else float('nan'))
-                print(f"[valEpoch e{epochIndex}] lenOH pos/neg mean={_m(len_oh[pos]):.1f}/{_m(len_oh[neg]):.1f} "
-                    f"std={_s(len_oh[pos]):.1f}/{_s(len_oh[neg]):.1f}")
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
-            if j == 0:
-                print(f"[validateEpoch e{epochIndex}] outputs shape={tuple(outputs.shape)} "
-                      f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
+
+            self._debugOutEpoch(
+                outputs,
+                "Validation",
+                j,
+                epochIndex
+            )
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -921,8 +1446,16 @@ class SmORFCNN(nn.Module):
 
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
-        print(f"[validateEpoch e{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
-              f"loss_avg={runningLoss/max(1,n):.6f}")
+
+        self._debugFinal(
+            probabilities,
+            targets,
+            runningLoss,
+            n,
+            "Validation",
+            epochIndex
+        )
+
         metrics = Helpers.computeEpochMetrics(
             probabilities,
             targets,
@@ -966,29 +1499,35 @@ class SmORFCNN(nn.Module):
             )
 
         for k, batch in iterator:
+
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
-            if k == 0:
-                print(f"[test] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
-                      f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
-                      f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
+
+            self._debugInEpoch(
+                xOnehot,
+                maskOnehot,
+                xEmbed,
+                maskEmbed,
+                y,
+                "Testing",
+                k,
+                1
+            )
+
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
-            if k == 0:
-                len_oh = maskOnehot.sum(-1).float()
-                pos = (y == 1)
-                neg = ~pos
-                def _m(v): return (v.mean().item() if v.numel() > 0 else float('nan'))
-                def _s(v): return (v.std().item()  if v.numel() > 1 else float('nan'))
-                print(f"[test] lenOH pos/neg mean={_m(len_oh[pos]):.1f}/{_m(len_oh[neg]):.1f} "
-                    f"std={_s(len_oh[pos]):.1f}/{_s(len_oh[neg]):.1f}")
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
-            if k == 0:
-                print(f"[test] outputs shape={tuple(outputs.shape)} "
-                      f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
+
+            self._debugOutEpoch(
+                outputs,
+                "Testing",
+                k,
+                1
+            )
+
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
 
@@ -1003,8 +1542,16 @@ class SmORFCNN(nn.Module):
 
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
-        print(f"[test] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
-              f"loss_avg={runningLoss/max(1,n):.6f}")
+
+        self._debugFinal(
+            probabilities,
+            targets,
+            runningLoss,
+            n,
+            "Testing",
+            1
+        )
+
         metrics = Helpers.computeEpochMetrics(
             probabilities,
             targets,
@@ -1135,13 +1682,13 @@ class SmORFCNN(nn.Module):
         
         testMetrics = self.test(self.testDataLoader)
 
-        # Helpers.printFitSummary(trainingMetrics, validationMetrics)
+        Helpers.printFitSummary(trainingMetrics, validationMetrics)
 
-        # Helpers.plotFitCurves(trainingMetrics, validationMetrics)
+        Helpers.plotFitCurves(trainingMetrics, validationMetrics)
 
-        # Helpers.plotROCCurve(validationMetrics, bestEpoch)
+        Helpers.plotROCCurve(validationMetrics, bestEpoch)
 
-        # Helpers.plotConfusionPie(trainingMetrics, validationMetrics, testMetrics, epochs)
+        Helpers.plotConfusionPie(trainingMetrics, validationMetrics, testMetrics, epochs)
 
         return trainingMetrics, validationMetrics
 
@@ -1250,15 +1797,94 @@ class SmORFCNN(nn.Module):
 
         summary = Helpers.kFoldSummary(foldMetrics)
 
-        # Helpers.printKFoldMetrics(foldMetrics, summary)
+        Helpers.printKFoldMetrics(foldMetrics, summary)
 
-        # Helpers.plotMeanROC(foldMetrics, summary)
+        Helpers.plotMeanROC(foldMetrics, summary)
 
         return foldMetrics, summary
 
     def saveModel() -> None:
         return
     
+    def _debugInit(self):
+
+        if self.debugMode:
+            print(f"[INIT] total params={self.modelParams} trainable={self.modelTrainableParams}")
+            print(f"[INIT] optimizer param_groups sizes={[len(g['params']) for g in self.optimizer.param_groups]}")
+            print(f"[INIT] device={self.device} multiKernel={self.multiKernel} temporalHead={self.temporalHead}")
+            print(f"[INIT] onehot kernels={self.onehotKernelList} embed kernels={self.embeddingsKernelList}")
+            print(f"[INIT] fusedDim={self.fusedDim} classifier={self.classifier}")
+    
+    def _debugDataLoader(self):
+
+        if self.debugMode:
+            tIdx  = set(self.trainDataLoader.dataset.indices)
+            vIdx  = set(self.validationDataLoader.dataset.indices)
+            teIdx = set(self.testDataLoader.dataset.indices)
+            print(f"[SPLIT] |train|={len(tIdx)} |val|={len(vIdx)} |test|={len(teIdx)} "
+                f"overlap train∩val={len(tIdx & vIdx)} train∩test={len(tIdx & teIdx)} val∩test={len(vIdx & teIdx)}")
+
+    def _debugIn(self, xOnehot, xEmbeddings, maskOnehot, maskEmbeddings):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[SmORFCNN.forward] xOnehot shape={tuple(xOnehot.shape)} "
+                    f"min/max/mean=({xOnehot.detach().min().item():.3f}/{xOnehot.detach().max().item():.3f}/{xOnehot.detach().float().mean().item():.3f})")
+            print(f"[SmORFCNN.forward] xEmbeddings shape={tuple(xEmbeddings.shape)} "
+                    f"min/max/mean=({xEmbeddings.detach().min().item():.3f}/{xEmbeddings.detach().max().item():.3f}/{xEmbeddings.detach().float().mean().item():.3f})")
+            print(f"[SmORFCNN.forward] maskOnehot shape={tuple(maskOnehot.shape)} sum per-batch={maskOnehot.sum(dim=1).detach().cpu().tolist()[:8]}")
+            print(f"[SmORFCNN.forward] maskEmbeddings shape={tuple(maskEmbeddings.shape)} sum per-batch={maskEmbeddings.sum(dim=1).detach().cpu().tolist()[:8]}")
+
+    def _debugOnehot(self, inputOneHot):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[SmORFCNN.forward] onehot features shape={tuple(inputOneHot.shape)}")
+
+    def _debugEmbeddings(self, inputEmbeddings):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[SmORFCNN.forward] embeddings features shape={tuple(inputEmbeddings.shape)}")
+    
+    def _debugLogits(self, logits):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[SmORFCNN.forward] logits shape={tuple(logits.shape)} "
+                f"min/max/mean=({logits.detach().min().item():.3f}/{logits.detach().max().item():.3f}/{logits.detach().float().mean().item():.3f}) "
+                f"sample={logits.detach().view(-1)[:8].cpu().tolist()}")
+            self.forwardDebugOnce = False
+
+    def _debugInEpoch(self, xOnehot, maskOnehot, xEmbed, maskEmbed, y, func, index, epochIndex):
+        if index == 0 and epochIndex == 1 and self.debugMode:
+            print(f"[{func} Epoch-{epochIndex}] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
+                f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
+                f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
+            print(f"[{func} Epoch-{epochIndex}] xEmbed stats: min={xEmbed.min().item():.3f} max={xEmbed.max().item():.3f} mean={xEmbed.float().mean().item():.3f} "
+                f"len(T)={xEmbed.shape[-1]}")
+    
+    def _debugOutEpoch(self, outputs, func, index, epochIndex):
+        if index == 0 and epochIndex == 1 and self.debugMode:
+            print(f"[{func} Epoch-{epochIndex}] outputs shape={tuple(outputs.shape)} "
+                f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
+            
+    def _debugStats(self, probs, loss, maxGradNorm, func, index, epochIndex):
+
+        if index == 0 and epochIndex == 1 and self.debugMode:
+
+            total_norm = torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
+
+            print(f"[{func} Epoch-{epochIndex}] total_grad_norm(before clip)={total_norm:.4f} "
+                f"clipped={bool(total_norm > maxGradNorm)}")
+            print(f"[{func} Epoch-{epochIndex}] classifier[0].weight grad |mean|="
+                f"{self.classifier[0].weight.grad.abs().mean().item():.6f}")
+
+            total_norm_sq = 0.0
+            for p in self.parameters():
+                if p.grad is not None:
+                    gn = p.grad.data.norm(2).item()
+                    total_norm_sq += gn*gn
+
+            print(f"[{func} Epoch-{epochIndex}] grad_norm(L2)={total_norm_sq**0.5:.4f} loss={loss.item():.6f} "
+                    f"probs sample={probs.detach().view(-1)[:8].cpu().tolist()}")
+    
+    def _debugFinal(self, probabilities, targets, runningLoss, n, func, epochIndex):
+        if epochIndex == 0 and self.debugMode:
+            print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
+            f"loss_avg={runningLoss/max(1,n):.6f}")
 
 mymodel = SmORFCNN(4,768,"features.pt")
 mymodel.initializeDataset()

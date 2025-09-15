@@ -7,11 +7,11 @@ PRINT_GREEN = "\033[32m"
 PRINT_RED = "\033[31m"
 PRINT_RESET = "\033[0m"
 
-### Generic Defaults
+########## ----------- Generic Defaults --------- ##########
 DEFAULT_DEBUG_MODE:                         bool        = False
-### end
+########## ----------- End --------- ##########
 
-### DNABERT6 Defaults
+########## ----------- DNABERT6 Defaults --------- ##########
 DEFAULT_DNABERT6_MODEL_ID:                  str         = "zhihan1996/DNA_bert_6"
 DEFAULT_DNABER6_DATASET_PATH:               str         = "train.csv"
 DEFAULT_DNABERT6_KMER_SIZE:                 int         = 6
@@ -28,37 +28,38 @@ DEFAULT_DNABERT6_DEVICE:                    str         = "cuda" if torch.cuda.i
 DEFAULT_DNABER6_SAVE_DIRECTORY:             str         = "dnabert6_smorfs_ft"
 DEFAULT_DNABERT6_STRATEGY:                  str         = "epoch"
 DEFAULT_DNABER6_METRIC:                     str         = "f1"
-### end
+########## ----------- End --------- ##########
 
-### Pytorch file printing defaults
+
+########## ----------- PyTorch File Print Defaults --------- ##########
 DEFAULT_PT_ROWS_PRINT:                      int         = 6
 DEFAULT_PT_LENGTH_PRINT:                    int         = 10
-### end
+########## ----------- End --------- ##########
 
-### Convolution Block Defaults
+########## ----------- Convolution Block Defaults --------- ##########
 DEFAULT_CONVOLUTION_PADDING                             = None
 DEFAULT_CONVOLUTION_DILATION:               int         = 1
 DEFAULT_CONVOLUTION_STRIDE:                 int         = 1
 DEFAULT_CONVOLUTION_GROUPS:                 int         = 1
 DEFAULT_CONVOLUTION_ACTIVATION:             str         = "gelu"
 DEFAULT_CONVOLUTION_DROPOUT:                float       = 0.0
-### end
+########## ----------- End --------- ##########
 
-### Multi Kernel convolution Defaults
+########## ----------- Multikernel Convolution Defaults --------- ##########
 DEFAULT_MULTI_KERNEL_KERNEL_LIST:           list        = [3,5,7,11,15]
 DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUTCH:   int         = 64
-### end
+########## ----------- End --------- ##########
 
-### Temporal Head Defaults
+########## ----------- Temporal Head Defaults --------- ##########
 DEFAULT_TEMPORAL_HIDDEN_CHANNELS:            int         = 128
 DEFAULT_TEMPORAL_KERNEL_REDUCTION:           int         = 1
 DEFAULT_TEMPORAL_KERNEL_RESIDUAL:            int         = 3
 DEFAULT_TEMPORAL_DROPOUT:                    float       = 0.1
 DEFAULT_TEMPORAL_MULTI_DILATION:             bool        = True
 DEFAULT_RESIDUAL_BLOCKS_NMB:                 int         = 2
-### end
+########## ----------- Temporal Head Defaults --------- ##########
 
-### smORFs CNN Classifier Defaults
+########## ----------- SMORF CNN Classifier Defaults --------- ##########
 DEFAULT_SMORFCNN_TEMPORAL_HEAD:              bool        = True
 DEFAULT_SMORFCNN_MULTI_KERNEL:               bool        = True
 DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST:         list        = [3,5,7,11,15]
@@ -91,7 +92,7 @@ DEFAULT_SMORFCNN_VALIDATION_BATCH_SIZE:      int         = 16
 DEFAULT_SMORFCNN_TEST_BATCH_SIZE:            int         = 16
 DEFAULT_SMORFCNN_EPOCHS:                     int         = 10
 DEFAULT_SMORFCNN_KFOLD:                      int         = 10
-### end
+########## ----------- End --------- ##########
 
 activationFunctionMapping = {
     "gelu":     nn.GELU(),
