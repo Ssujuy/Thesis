@@ -7,6 +7,10 @@ PRINT_GREEN = "\033[32m"
 PRINT_RED = "\033[31m"
 PRINT_RESET = "\033[0m"
 
+### Generic Defaults
+DEFAULT_DEBUG_MODE:                         bool        = False
+### end
+
 ### DNABERT6 Defaults
 DEFAULT_DNABERT6_MODEL_ID:                  str         = "zhihan1996/DNA_bert_6"
 DEFAULT_DNABER6_DATASET_PATH:               str         = "train.csv"

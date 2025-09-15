@@ -36,10 +36,13 @@ class ConvolutionBlock(nn.Module):
             dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
             groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
-            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT
+            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
+            debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
 
+        self.forwardDebugOnce = debug
+        self.debugMode = debug
         self.inputChannels = inputChannels
         self.outputChannels = outputChannels
         self.kernel = kernel
@@ -69,6 +72,16 @@ class ConvolutionBlock(nn.Module):
         self.activation = Types.activationFunctionMapping.get(activation)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        self._debugIn(x)
+        x = self.conv1d(x)
+        x = self.batchNormalization(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+        self._debugOut(x)
+        return x
+
     def print(self) -> None:
 
         print("Convolution Block Parameters:")
@@ -80,13 +93,17 @@ class ConvolutionBlock(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
+        print(f" - Model Parameters: {self.dropout}")
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv1d(x)
-        x = self.batchNormalization(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-        return x
+    def _debugIn(self,x):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[ConvolutionBlock] in shape={tuple(x.shape)} dtype={x.dtype} device={x.device} "
+            f"min={x.detach().min().item():.4f} max={x.detach().max().item():.4f} mean={x.detach().float().mean().item():.4f}")
+
+    def _debugOut(self,x):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[ConvolutionBlock] out shape={tuple(x.shape)}")
+            self.forwardDebugOnce = False
     
 class ResidualBlock(nn.Module):
     """
@@ -103,10 +120,13 @@ class ResidualBlock(nn.Module):
             dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
             groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
-            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT
+            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
+            debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
 
+        self.debugMode = debug
+        self.forwardDebugOnce = debug
         self.inputChannels = inputChannels
         self.outputChannels = outputChannels
         self.kernel = kernel
@@ -141,6 +161,12 @@ class ResidualBlock(nn.Module):
             dropout=self.dropout
         )
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self._debugIn(x)
+        out = x + self.convolution2(self.convolution1(x))
+        self._debugOut(out)
+        return out
+
     def print(self) -> None:
 
         print("Residual Block Parameters:")
@@ -152,9 +178,16 @@ class ResidualBlock(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
+        print(f" - Model Parameters: {self.activation}")
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.convolution2(self.convolution1(x))
+    def _debugIn(self,x):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[ResidualBlock] in shape={tuple(x.shape)}")
+
+    def _debugOut(self,out):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[ResidualBlock] out shape={tuple(out.shape)}")
+            self.forwardDebugOnce = False
 
 class MultiKernelConvolution(nn.Module):
     """
@@ -171,10 +204,13 @@ class MultiKernelConvolution(nn.Module):
             dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
             groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
-            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT
+            dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
+            debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
 
+        self.debugMode = debug
+        self.forwardDebugOnce = debug
         self.inputChannels = inputChannels
         self.outputChannelsKernel = outputChannelsKernel
         self.kernelList = kernelList
@@ -203,6 +239,17 @@ class MultiKernelConvolution(nn.Module):
         
         self.outputChannels = outputChannelsKernel * len(kernelList)
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        output = []
+
+        for branch in self.branches:
+            b = branch(x)
+            output.append(b)
+
+        out = torch.cat(output, dim=1)
+        return out
+
     def print(self) -> None:
 
         print("Multiple Kernel Convolution Parameters:")
@@ -215,16 +262,19 @@ class MultiKernelConvolution(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
+        print(f" - Model Parameters: {self.dropout}")
+    
+    def _debugIn(self,x):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[MultiKernelConv] in shape={tuple(x.shape)} kernels={self.kernelList}")
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def _debugBranch(self,b):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[MultiKernelConv] out shape={tuple(b.shape)}")
 
-        output = []
-
-        for branch in self.branches:
-            output.append(branch(x))
-
-        return torch.cat(output, dim=1)
-
+    def _debugOut(self,out):
+        if self.forwardDebugOnce and self.debugMode:
+            print(f"[MultiKernelConv] concat out shape={tuple(out.shape)}")
 
 class TemporalHead(nn.Module):
     """
@@ -246,7 +296,7 @@ class TemporalHead(nn.Module):
         residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB
         ):
         super().__init__()
-
+        self.firsttime = True
         self.inputChannels = inputChannels
         self.hiddenChannels = hiddenChannels
         self.kernelResidual = kernelResidual
@@ -320,14 +370,26 @@ class TemporalHead(nn.Module):
         returns: [B, 2*C] (global-max ⊕ masked-global-avg)
         """
         # refine features (length preserved)
+        if self.firsttime:
+            print(f"[TemporalHead] in x shape={tuple(x.shape)} mask shape={tuple(mask.shape)} "
+            f"mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}")
         x = self.reduce(x)        # [B, C, L]
+        if self.firsttime:
+            print(f"[TemporalHead] after reduce shape={tuple(x.shape)}")
         x = self.residualBlocks(x)        # [B, C, L]
+        if self.firsttime:    
+            print(f"[TemporalHead] after residualBlocks shape={tuple(x.shape)}")
 
-        return torch.cat([
-                Helpers.globalMaxPooling(x, mask),
-                Helpers.globalAveragePooling(x, mask)],
-                dim=1
-        )         # [B, 2*C]
+        gmp = Helpers.globalMaxPooling(x, mask)
+        gap = Helpers.globalAveragePooling(x, mask)
+        if self.firsttime:
+            print(f"[TemporalHead] GMP type={type(gmp)} shape={tuple(gmp.shape)} "
+            f"GAP type={type(gap)} shape={tuple(gap.shape)}")
+        out = torch.cat([gmp, gap], dim=1)
+        if self.firsttime:
+            print(f"[TemporalHead] out shape={tuple(out.shape)}")
+        self.firsttime = False
+        return out
 
     
 
@@ -390,7 +452,7 @@ class SmORFCNN(nn.Module):
 
     ):
         super().__init__()
-
+        self.firsttime = True
         self.seed = seed
         self.deterministic = deterministic
         self.device = device
@@ -444,9 +506,6 @@ class SmORFCNN(nn.Module):
         self.testSplit = testSplit
         self.epochs = epochs
 
-        self.optimizer = self._optimizerInit()
-        self.scheduler = self._schedulerInit()
-
         self.onehotMultiKernelClass = None
         self.onehotTemporalClass = None
         self.embeddingsMultiKernelClass = None
@@ -493,6 +552,16 @@ class SmORFCNN(nn.Module):
             nn.Linear(self.classifierOutput, self.classes)
         )
 
+        self.optimizer = self._optimizerInit()
+        self.scheduler = self._schedulerInit()
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print(f"[INIT] total params={total_params:,} trainable={trainable_params:,}")
+        print(f"[INIT] optimizer param_groups sizes={[len(g['params']) for g in self.optimizer.param_groups]}")
+        print(f"[INIT] device={self.device} multiKernel={self.multiKernel} temporalHead={self.temporalHead}")
+        print(f"[INIT] onehot kernels={self.onehotKernelList} embed kernels={self.embeddingsKernelList}")
+        print(f"[INIT] fusedDim={self.fusedDim} classifier={self.classifier}")
+
         self.trainDataLoader = None
         self.validationDataLoader = None
         self.testDataLoader = None
@@ -512,11 +581,19 @@ class SmORFCNN(nn.Module):
             self.seed
         )
 
-        Helpers.printDataloader("Training", self.trainDataLoader)
-        Helpers.printDataloader("Validation", self.validationDataLoader)
-        Helpers.printDataloader("Testing", self.testDataLoader)
+        # Helpers.printDataloader("Training", self.trainDataLoader)
+        # Helpers.printDataloader("Validation", self.validationDataLoader)
+        # Helpers.printDataloader("Testing", self.testDataLoader)
 
-        Helpers.plotLabelDistribution(self.trainDataLoader, self.validationDataLoader, self.testDataLoader)
+        # Helpers.plotLabelDistribution(self.trainDataLoader, self.validationDataLoader, self.testDataLoader)
+        try:
+            t_idx  = set(self.trainDataLoader.dataset.indices)
+            v_idx  = set(self.validationDataLoader.dataset.indices)
+            te_idx = set(self.testDataLoader.dataset.indices)
+            print(f"[SPLIT] |train|={len(t_idx)} |val|={len(v_idx)} |test|={len(te_idx)} "
+                f"overlap train∩val={len(t_idx & v_idx)} train∩test={len(t_idx & te_idx)} val∩test={len(v_idx & te_idx)}")
+        except Exception as e:
+            print(f"[SPLIT] couldn't inspect indices: {e}")
 
     def _calculateFusedDim(self) -> int:
         # If TemporalHead is ON, each branch outputs 2*hidden → two branches = 4*hidden.
@@ -536,6 +613,8 @@ class SmORFCNN(nn.Module):
         # Do NOT add MultiKernel channels separately when TemporalHead is ON;
         # they’re already reduced inside the head. (Avoid double counting.)
         multiKernelDim = 0
+
+        print(f"[FUSED DIM] temporalHeadDim={temporalHeadDim} poolingNoTemporalDim={poolingNoTemporalDim} -> fusedDim={temporalHeadDim + multiKernelDim + poolingNoTemporalDim}")
 
         return temporalHeadDim + multiKernelDim + poolingNoTemporalDim
 
@@ -592,7 +671,13 @@ class SmORFCNN(nn.Module):
         Returns:
         logits: [B] if self.classes==1 else [B, self.classes]
         """
-
+        if self.firsttime:
+            print(f"[SmORFCNN.forward] xOnehot shape={tuple(xOnehot.shape)} "
+                    f"min/max/mean=({xOnehot.detach().min().item():.3f}/{xOnehot.detach().max().item():.3f}/{xOnehot.detach().float().mean().item():.3f})")
+            print(f"[SmORFCNN.forward] xEmbeddings shape={tuple(xEmbeddings.shape)} "
+                    f"min/max/mean=({xEmbeddings.detach().min().item():.3f}/{xEmbeddings.detach().max().item():.3f}/{xEmbeddings.detach().float().mean().item():.3f})")
+            print(f"[SmORFCNN.forward] maskOnehot shape={tuple(maskOnehot.shape)} sum per-batch={maskOnehot.sum(dim=1).detach().cpu().tolist()[:8]}")
+            print(f"[SmORFCNN.forward] maskEmbeddings shape={tuple(maskEmbeddings.shape)} sum per-batch={maskEmbeddings.sum(dim=1).detach().cpu().tolist()[:8]}")
         features = []
         inputOneHot = xOnehot
         inputEmbeddings = xEmbeddings
@@ -604,13 +689,18 @@ class SmORFCNN(nn.Module):
             raise AttributeError("Did not receive dnabert6 embeddings input!")
 
         if self.multiKernel:
+            if self.firsttime:
+                print("[SmORFCNN.forward] Passing onehot through MultiKernelConvolution")
             inputOneHot = self.onehotMultiKernelClass(inputOneHot)
 
         if self.temporalHead:
+            if self.firsttime:
+                print("[SmORFCNN.forward] Passing onehot through TemporalHead")
             inputOneHot = self.onehotTemporalClass(inputOneHot, maskOnehot)
             
-        else:     
-
+        else:
+            if self.firsttime:
+                print("[SmORFCNN.forward] Onehot branch: applying masked GMP+GAP without TemporalHead")
             inputOneHot = torch.cat(
                 [
                     Helpers.globalMaxPooling(inputOneHot, maskOnehot),
@@ -621,32 +711,47 @@ class SmORFCNN(nn.Module):
 
         features.append(inputOneHot)
 
+        if self.firsttime:
+            print(f"[SmORFCNN.forward] onehot features shape={tuple(inputOneHot.shape)}")
 
         if self.multiKernel:
+            if self.firsttime:
+                print("[SmORFCNN.forward] Passing embeddings through MultiKernelConvolution")
             inputEmbeddings = self.embeddingsMultiKernelClass(inputEmbeddings)
 
         if self.temporalHead:
+            if self.firsttime:
+                print("[SmORFCNN.forward] Passing embeddings through TemporalHead")
             inputEmbeddings = self.embeddingsTemporalClass(inputEmbeddings, maskEmbeddings)
 
         else:
+            if self.firsttime:
+                print("[SmORFCNN.forward] Embeddings branch: applying masked GMP+GAP without TemporalHead")
             inputEmbeddings = torch.cat([
                     Helpers.globalMaxPooling(inputEmbeddings, maskEmbeddings),
                     Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
                 dim=1
             )
-
+        if self.firsttime:
+            print(f"[SmORFCNN.forward] embeddings features shape={tuple(inputEmbeddings.shape)}")
         features.append(inputEmbeddings)
 
         if not features:
             raise RuntimeError("Failed to produce any features!")
 
         fused = features[0] if len(features) == 1 else torch.cat(features, dim=1)
+        if self.firsttime:
+            print(f"[SmORFCNN.forward] fused features shape={tuple(fused.shape)} (expected last dim={self.fusedDim})")
 
         if fused.size(1) != self.fusedDim:
             raise ValueError(f"Expected fused dimension {self.fusedDim} , got {fused.size(1)}")
 
         logits = self.classifier(fused)
-
+        if self.firsttime:
+            print(f"[SmORFCNN.forward] logits shape={tuple(logits.shape)} "
+                f"min/max/mean=({logits.detach().min().item():.3f}/{logits.detach().max().item():.3f}/{logits.detach().float().mean().item():.3f}) "
+                f"sample={logits.detach().view(-1)[:8].cpu().tolist()}")
+        self.firsttime = False
         return logits.squeeze(-1) if self.classes == 1 else logits
 
     def trainEpoch(
@@ -682,25 +787,52 @@ class SmORFCNN(nn.Module):
             iterator = enumerate(trainingData)
 
         for i, batch in iterator:
-
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            if i == 0:
+                print(f"[trainEpoch e{epochIndex}] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
+                      f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
+                      f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
+                print(f"[trainEpoch e{epochIndex}] xEmbed stats: min={xEmbed.min().item():.3f} max={xEmbed.max().item():.3f} mean={xEmbed.float().mean().item():.3f} "
+                      f"len(T)={xEmbed.shape[-1]}")
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
-
+            if i == 0:
+                len_oh = maskOnehot.sum(-1).float()
+                pos = (y == 1)
+                neg = ~pos
+                def _m(v): return (v.mean().item() if v.numel() > 0 else float('nan'))
+                def _s(v): return (v.std().item()  if v.numel() > 1 else float('nan'))
+                print(f"[trainEpoch e{epochIndex}] lenOH pos/neg mean={_m(len_oh[pos]):.1f}/{_m(len_oh[neg]):.1f} "
+                    f"std={_s(len_oh[pos]):.1f}/{_s(len_oh[neg]):.1f}")
             self.optimizer.zero_grad()
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
-
+            if i == 0:
+                print(f"[trainEpoch e{epochIndex}] outputs shape={tuple(outputs.shape)} "
+                      f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
 
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
+            total_norm = torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
+            if i == 0:
+                print(f"[trainEpoch e{epochIndex}] total_grad_norm(before clip)={total_norm:.4f} "
+                    f"clipped={bool(total_norm > maxGradNorm)}")
+                print(f"[trainEpoch e{epochIndex}] classifier[0].weight grad |mean|="
+                    f"{self.classifier[0].weight.grad.abs().mean().item():.6f}")
 
+            if i == 0:
+                total_norm_sq = 0.0
+                for p in self.parameters():
+                    if p.grad is not None:
+                        gn = p.grad.data.norm(2).item()
+                        total_norm_sq += gn*gn
+                print(f"[trainEpoch e{epochIndex}] grad_norm(L2)={total_norm_sq**0.5:.4f} loss={loss.item():.6f} "
+                      f"probs sample={probs.detach().view(-1)[:8].cpu().tolist()}")
             self.optimizer.step()
 
             batchSize = y.size(0)
@@ -714,7 +846,8 @@ class SmORFCNN(nn.Module):
 
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
-
+        print(f"[trainEpoch e{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
+              f"loss_avg={runningLoss/max(1,n):.6f}")
         return Helpers.computeEpochMetrics(
             probabilities,
             targets,
@@ -749,16 +882,30 @@ class SmORFCNN(nn.Module):
                 leave=False
             )
 
-        for _, batch in iterator:
-
+        for j, batch in iterator:
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            if j == 0:
+                print(f"[validateEpoch e{epochIndex}] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
+                      f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
+                      f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
+            if j == 0:
+                len_oh = maskOnehot.sum(-1).float()
+                pos = (y == 1)
+                neg = ~pos
+                def _m(v): return (v.mean().item() if v.numel() > 0 else float('nan'))
+                def _s(v): return (v.std().item()  if v.numel() > 1 else float('nan'))
+                print(f"[valEpoch e{epochIndex}] lenOH pos/neg mean={_m(len_oh[pos]):.1f}/{_m(len_oh[neg]):.1f} "
+                    f"std={_s(len_oh[pos]):.1f}/{_s(len_oh[neg]):.1f}")
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
+            if j == 0:
+                print(f"[validateEpoch e{epochIndex}] outputs shape={tuple(outputs.shape)} "
+                      f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -774,7 +921,8 @@ class SmORFCNN(nn.Module):
 
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
-
+        print(f"[validateEpoch e{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
+              f"loss_avg={runningLoss/max(1,n):.6f}")
         metrics = Helpers.computeEpochMetrics(
             probabilities,
             targets,
@@ -817,17 +965,30 @@ class SmORFCNN(nn.Module):
                 leave=False
             )
 
-        for _, batch in iterator:
-
+        for k, batch in iterator:
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            if k == 0:
+                print(f"[test] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
+                      f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
+                      f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
+            if k == 0:
+                len_oh = maskOnehot.sum(-1).float()
+                pos = (y == 1)
+                neg = ~pos
+                def _m(v): return (v.mean().item() if v.numel() > 0 else float('nan'))
+                def _s(v): return (v.std().item()  if v.numel() > 1 else float('nan'))
+                print(f"[test] lenOH pos/neg mean={_m(len_oh[pos]):.1f}/{_m(len_oh[neg]):.1f} "
+                    f"std={_s(len_oh[pos]):.1f}/{_s(len_oh[neg]):.1f}")
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
-
+            if k == 0:
+                print(f"[test] outputs shape={tuple(outputs.shape)} "
+                      f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
 
@@ -842,7 +1003,8 @@ class SmORFCNN(nn.Module):
 
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
-
+        print(f"[test] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
+              f"loss_avg={runningLoss/max(1,n):.6f}")
         metrics = Helpers.computeEpochMetrics(
             probabilities,
             targets,
@@ -973,13 +1135,13 @@ class SmORFCNN(nn.Module):
         
         testMetrics = self.test(self.testDataLoader)
 
-        Helpers.printFitSummary(trainingMetrics, validationMetrics)
+        # Helpers.printFitSummary(trainingMetrics, validationMetrics)
 
-        Helpers.plotFitCurves(trainingMetrics, validationMetrics)
+        # Helpers.plotFitCurves(trainingMetrics, validationMetrics)
 
-        Helpers.plotROCCurve(validationMetrics, bestEpoch)
+        # Helpers.plotROCCurve(validationMetrics, bestEpoch)
 
-        Helpers.plotConfusionPie(trainingMetrics, validationMetrics, testMetrics, epochs)
+        # Helpers.plotConfusionPie(trainingMetrics, validationMetrics, testMetrics, epochs)
 
         return trainingMetrics, validationMetrics
 
@@ -1088,9 +1250,9 @@ class SmORFCNN(nn.Module):
 
         summary = Helpers.kFoldSummary(foldMetrics)
 
-        Helpers.printKFoldMetrics(foldMetrics, summary)
+        # Helpers.printKFoldMetrics(foldMetrics, summary)
 
-        Helpers.plotMeanROC(foldMetrics, summary)
+        # Helpers.plotMeanROC(foldMetrics, summary)
 
         return foldMetrics, summary
 
@@ -1103,5 +1265,5 @@ mymodel.initializeDataset()
 mymodel.fit(
     mymodel.trainDataLoader,
     mymodel.validationDataLoader,
-    10
+    5
 )

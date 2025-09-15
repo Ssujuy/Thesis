@@ -496,9 +496,9 @@ def computeEpochMetrics(
     total = truePositive + trueNegative + falsePositive + falseNegative
 
     accuraccy = (truePositive + trueNegative) / total
-    precision = truePositive / truePositive + falsePositive
-    recall = truePositive / truePositive + falseNegative
-    f1 = 2 * precision * recall / precision + recall
+    precision = truePositive / (truePositive + falsePositive)
+    recall = truePositive / (truePositive + falseNegative)
+    f1 = (2 * precision * recall) / (precision + recall)
 
     epochLoss = runningLoss / n
 
