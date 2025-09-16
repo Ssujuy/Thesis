@@ -367,15 +367,16 @@ def sequenceTo1Hot(sequence: str)-> torch.Tensor:
     Tensor
         DNA sequence as 1hot encoded Tensor.
     """
+
     encoded = torch.zeros(Types.DEFAULT_DNABERT6_WINDOW_SIZE,4)
-    
+
     for index, nt in enumerate(sequence):
-        
+
         if nt not in sequenceMapping:
             raise ValueError(f"Unexpected character “{nt}” in DNA sequence!")        
-        
+
         encoded[index] = sequenceMapping.get(nt)
-        
+
     return encoded
 
 ########## ----------- End --------- ##########
@@ -390,18 +391,17 @@ def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
     Parameters
     ----------
-            x : Tensor
-                input
-            mask : Tensor
-                mask of input Tensor
+    x : Tensor
+        input Tensor.
+    mask : Tensor
+        mask of input Tensor, shape [B, 1, L].
 
     Returns
     ----------
     Tensor
-        Global Max Tensor.
+        Global Max Tensor, of shape [B, C].
     """
-    # mask        ---> [B, 1, L]
-    # globalMax   ---> [B, C]
+
     m = mask[:, None, :]
 
     xNInf = x.masked_fill(m == 0, float("-inf"))
@@ -427,10 +427,9 @@ def globalAveragePooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     Returns
     ----------
     Tensor
-        Returns Global Average.
+        Returns Global Average, of shape [B, C].
     """
-    # denom           ---> [B, 1]
-    # globalAverage   ---> [B, C]
+
     m = mask[:, None, :]
     mFloat = m.to(dtype=x.dtype)
 
@@ -583,6 +582,7 @@ def kFoldSummary(foldMetrics: list) -> dict:
     dict
         with mean/std for scalar metrics and sums for counts.
     """
+
     meanKeys = ["loss", "acc", "precision", "recall", "f1", "auc", "learningRate"]
     sumKeys = ["TP", "TN", "FP", "FN"]
 
@@ -623,6 +623,7 @@ def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     epochIndex : int
         Current epoch.
     """
+
     df = pd.DataFrame([metrics])
     print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
     print(df.to_string(index=False))
@@ -639,6 +640,7 @@ def printEpochAUC(auc: dict, epochIndex: int) -> None:
     epochIndex : int
         Current epoch.
     """
+
     df = pd.DataFrame(auc)
     print(f"Epoch {epochIndex} AUC , False Positive Ratio and False Negative Ratio")
     print(df)
@@ -680,6 +682,7 @@ def printKFoldMetrics(
     foldMetricsSummary : dict
         Contains summary (sum,mean and std) of fold metrics.
     """
+
     df = pd.DataFrame(foldMetrics)
     print("\nPer-fold validation metrics:")
     print(df)
@@ -712,6 +715,7 @@ def plotLabelDistribution(
     testDataLoader : DataLoader
         Data for model testing.
     """
+
     totalLength = len(trainDataLoader.dataset)
     totalLength += len(validationDataLoader.dataset)
     totalLength += len(testDataLoader.dataset)
@@ -797,6 +801,7 @@ def plotConfusionPie(
     epochs : int
         Total epochs of fit.
     """
+
     TP,TN,FP,FN,total = 0,0,0,0,0
 
     for epoch in range(0, epochs):
@@ -839,6 +844,7 @@ def plotFitCurves(
     validationMetrics : dict
     Contans epoch-size lists for each metric key in validation.
     """
+
     epochs = len(trainingMetrics["loss"])
     x = np.arange(1, epochs + 1)
 
@@ -906,6 +912,7 @@ def plotMeanROC(
     summary : dict
         Contains summary (sum,mean and std) of fold metrics.
     """
+
     grid = np.linspace(0.0, 1.0, 1001)
     tprs = []
     aucs = []

@@ -170,7 +170,7 @@ class ConvolutionBlock(nn.Module):
 
         Return
         ----------
-        x : Tensor
+        Tensor
             Output Tensor after convolution, batch normalization, activation and dropout.
         """
 
@@ -217,6 +217,7 @@ class ConvolutionBlock(nn.Module):
         """
         Prints debug information for output shape in forward. Only works once for forward and when debugMode is True.\n
         Toggles forwardDebugOnce attribute, to only run once.
+
         Parameters
         ----------
         x : Tensor
@@ -364,7 +365,7 @@ class ResidualBlock(nn.Module):
         )
 
         self.convolution2 = ConvolutionBlock(
-            self.inputChannels,
+            self.outputChannels,
             self.outputChannels,
             self.kernel,
             stride=self.stride,
@@ -390,7 +391,7 @@ class ResidualBlock(nn.Module):
 
         Return
         ----------
-        out : Tensor
+        Tensor
             Output Tensor after Residual Mapping.
         """
 
@@ -596,7 +597,7 @@ class MultiKernelConvolution(nn.Module):
 
         Return
         ----------
-        out : Tensor
+        Tensor
             Output Tensor after Residual Mapping.
         """
 
@@ -743,7 +744,7 @@ class TemporalHead(nn.Module):
         inputChannels,
         hiddenChannels: int         = Types.DEFAULT_TEMPORAL_HIDDEN_CHANNELS,
         kernelResidual: int         = Types.DEFAULT_TEMPORAL_KERNEL_RESIDUAL,
-        kernerReduction: int        = Types.DEFAULT_TEMPORAL_KERNEL_REDUCTION,
+        kernelReduction: int        = Types.DEFAULT_TEMPORAL_KERNEL_REDUCTION,
         stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
         padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
@@ -755,7 +756,7 @@ class TemporalHead(nn.Module):
         ):
         super().__init__()
         """
-        Constructs a reduce Convolution Block, a stack of Residual block of size residualBlocks\n
+        Constructs a Convolution Block for input reduction, a stack of Residual block of size residualBlocks\n
         and initializes member variables.
 
         Parameters
@@ -802,7 +803,7 @@ class TemporalHead(nn.Module):
         self.inputChannels = inputChannels
         self.hiddenChannels = hiddenChannels
         self.kernelResidual = kernelResidual
-        self.kernelReduction = kernerReduction
+        self.kernelReduction = kernelReduction
         self.stride = stride
         self.padding = padding
         self.groups = groups
@@ -849,16 +850,25 @@ class TemporalHead(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
-        x:    [B, C, L]   feature map
-        mask: [B, L]      1 for valid tokens, 0 for right-padded tail.
+        Passes input Tensor to reduce (Conv Block) and project to 128 size.\n
+        Then passes reduced input to Residual Blocks sequentially for residualBlocks number.\n
+        Finally, calculates global max pooling and global average pooling, then concatenates.
 
-        1. Project to 128 size
-        2. Calculate residualBlocks number of Residuals sequentially.
-        3. Calculate global max pooling and global average pooling, then concatenate.
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor, shape [B, C, L] feature map.
 
-        returns: [B, 2*C] (global-max ⊕ masked-global-avg)
+        mask : Tensor
+            Mask Tensor with shape [B, L], 1 for valid tokens, 0 for right-padded tail.
+
+        Return
+        ----------
+        Tensor
+            Concatenation of global max pooling and global average pooling, with shape [B, 2*C] (global-max ⊕ masked-global-avg).
         """
-        self._debugIn(x)
+
+        self._debugIn(x, mask)
 
         x = self.reduce(x)
 
@@ -900,24 +910,78 @@ class TemporalHead(nn.Module):
         print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
     def _debugIn(self, x: torch.Tensor, mask: torch.Tensor) -> None:
+        """
+        Prints shape of input Tensor and mask Tensor in forward. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.
+        
+        mask : Tensor
+            Mask Tensor of input.
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] in x shape={tuple(x.shape)} mask shape={tuple(mask.shape)} "
             f"mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}")
     
     def _debugReduce(self, x: torch.Tensor) -> None:
+        """
+        Prints shape of input Tensor and mask Tensor in forward after reduction.\n
+        Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] after reduce shape={tuple(x.shape)}")
 
     def _debugRes(self, x: torch.Tensor) -> None:
+        """
+        Prints shape of input Tensor and mask Tensor in forward after Residual stack.\n
+        Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] after residualBlocks shape={tuple(x.shape)}")
     
-    def  _debugPooling(self,gmp,gap):
+    def  _debugPooling(self, gmp: torch.Tensor, gap: torch.Tensor) -> None:
+        """
+        Prints type and shape of Gloab Max and Global Average Pooling in forward.\n
+        Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        gmp : Tensor
+            Gloabal Max Pooling Tensor.
+        
+        gap : Tensor
+            Gloabal Average Pooling Tensor.
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] GMP type={type(gmp)} shape={tuple(gmp.shape)} "
             f"GAP type={type(gap)} shape={tuple(gap.shape)}")
     
     def _debugOut(self, out: torch.Tensor) -> None:
+        """
+        Prints shape of forward output. Only works once for forward and when debugMode is True.
+
+        Parameters
+        ----------
+        out : Tensor
+            Output Tensor.
+        """
+
         if self.forwardDebugOnce and self.debugMode:
             print(f"[TemporalHead] out shape={tuple(out.shape)}")
             self.forwardDebugOnce = False
@@ -1205,18 +1269,12 @@ class SmORFCNN(nn.Module):
             raise AttributeError("Did not receive dnabert6 embeddings input!")
 
         if self.multiKernel:
-            if self.firsttime:
-                print("[SmORFCNN.forward] Passing onehot through MultiKernelConvolution")
             inputOneHot = self.onehotMultiKernelClass(inputOneHot)
 
         if self.temporalHead:
-            if self.firsttime:
-                print("[SmORFCNN.forward] Passing onehot through TemporalHead")
             inputOneHot = self.onehotTemporalClass(inputOneHot, maskOnehot)
             
         else:
-            if self.firsttime:
-                print("[SmORFCNN.forward] Onehot branch: applying masked GMP+GAP without TemporalHead")
             inputOneHot = torch.cat(
                 [
                     Helpers.globalMaxPooling(inputOneHot, maskOnehot),
@@ -1230,18 +1288,12 @@ class SmORFCNN(nn.Module):
         features.append(inputOneHot)
 
         if self.multiKernel:
-            if self.firsttime:
-                print("[SmORFCNN.forward] Passing embeddings through MultiKernelConvolution")
             inputEmbeddings = self.embeddingsMultiKernelClass(inputEmbeddings)
 
         if self.temporalHead:
-            if self.firsttime:
-                print("[SmORFCNN.forward] Passing embeddings through TemporalHead")
             inputEmbeddings = self.embeddingsTemporalClass(inputEmbeddings, maskEmbeddings)
 
         else:
-            if self.firsttime:
-                print("[SmORFCNN.forward] Embeddings branch: applying masked GMP+GAP without TemporalHead")
             inputEmbeddings = torch.cat([
                     Helpers.globalMaxPooling(inputEmbeddings, maskEmbeddings),
                     Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
@@ -1301,17 +1353,7 @@ class SmORFCNN(nn.Module):
         for i, batch in iterator:
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
 
-            self._debugInEpoch(
-                self,
-                xOnehot,
-                maskOnehot,
-                xEmbed,
-                maskEmbed,
-                y,
-                "Training",
-                i,
-                epochIndex
-            )
+            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, maskEmbed, y, "Training", i, epochIndex)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
@@ -1323,12 +1365,7 @@ class SmORFCNN(nn.Module):
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
 
-            self._debugOutEpoch(
-                outputs,
-                "Training",
-                i,
-                epochIndex
-            )
+            self._debugOutEpoch(outputs, "Training", i, epochIndex)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -1406,16 +1443,7 @@ class SmORFCNN(nn.Module):
 
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
 
-            self._debugInEpoch(
-                xOnehot,
-                maskOnehot,
-                xEmbed,
-                maskEmbed,
-                y,
-                "Validation",
-                j,
-                epochIndex
-            )
+            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, maskEmbed, y, "Validation", j, epochIndex)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
@@ -1425,12 +1453,7 @@ class SmORFCNN(nn.Module):
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
 
-            self._debugOutEpoch(
-                outputs,
-                "Validation",
-                j,
-                epochIndex
-            )
+            self._debugOutEpoch(outputs, "Validation", j, epochIndex)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -1447,14 +1470,7 @@ class SmORFCNN(nn.Module):
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
 
-        self._debugFinal(
-            probabilities,
-            targets,
-            runningLoss,
-            n,
-            "Validation",
-            epochIndex
-        )
+        self._debugFinal(probabilities, targets, runningLoss, n, "Validation", epochIndex)
 
         metrics = Helpers.computeEpochMetrics(
             probabilities,
@@ -1502,16 +1518,7 @@ class SmORFCNN(nn.Module):
 
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
 
-            self._debugInEpoch(
-                xOnehot,
-                maskOnehot,
-                xEmbed,
-                maskEmbed,
-                y,
-                "Testing",
-                k,
-                1
-            )
+            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, maskEmbed, y, "Testing", k, 1)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
@@ -1521,12 +1528,7 @@ class SmORFCNN(nn.Module):
 
             outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
 
-            self._debugOutEpoch(
-                outputs,
-                "Testing",
-                k,
-                1
-            )
+            self._debugOutEpoch(outputs, "Testing", k, 1)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -1543,14 +1545,7 @@ class SmORFCNN(nn.Module):
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
 
-        self._debugFinal(
-            probabilities,
-            targets,
-            runningLoss,
-            n,
-            "Testing",
-            1
-        )
+        self._debugFinal(probabilities, targets, runningLoss, n, "Testing", 1)
 
         metrics = Helpers.computeEpochMetrics(
             probabilities,
@@ -1643,10 +1638,6 @@ class SmORFCNN(nn.Module):
                 threshold=self.threshold,
             )
 
-            # ---- 3) (Optional) scheduler step — typically once per epoch ----
-                # Many schedulers expect .step() AFTER val metrics (e.g., ReduceLROnPlateau uses val loss)
-                # If you use ReduceLROnPlateau, call as: scheduler.step(val_metrics["loss"])
-
             if isinstance(self.scheduler, lrScheduler.ReduceLROnPlateau):
                 self.scheduler.step(epochValMetrics["loss"])
             else:
@@ -1698,8 +1689,6 @@ class SmORFCNN(nn.Module):
     ):
         """
         """
-    # ---------- A) Build CV pool from your existing loaders ----------
-        # Concat order is [train subset, val subset]
         fullDataset = ConcatDataset([self.trainDataLoader.dataset, self.validationDataLoader.dataset])
 
         # ---------- B) Extract labels directly (no type branching) ----------
@@ -1722,11 +1711,9 @@ class SmORFCNN(nn.Module):
 
         labels = torch.cat([tLabels, valLabels], dim=0).detach().cpu().long().numpy()  # [N_tr+N_va]
 
-        # ---------- C) Stratified KFold splits ----------
         splitter = StratifiedKFold(n_splits=k, shuffle=True, random_state=self.seed)
         splits = list(splitter.split(np.arange(len(labels)), labels))
 
-        # ---------- D) Bookkeeping ----------
         foldMetrics = []
         bestFoldF1 = -1.0
         bestFoldState = None
@@ -1738,7 +1725,6 @@ class SmORFCNN(nn.Module):
 
             print(f"\n=== Fold {foldIndex}/{k}: train={len(trainIndex)}  val={len(valIndex)} ===")
 
-            # ---------- E) Build fold-specific loaders ----------
             trainDataset = Subset(fullDataset, indices=trainIndex)
             valDataset = Subset(fullDataset, indices=valIndex)
 
@@ -1771,7 +1757,6 @@ class SmORFCNN(nn.Module):
                 epochs=self.epochs
             )
 
-            # Final metrics on this fold's validation split
             metrics = self.validateEpoch(
                 validationData=validationDataloader,
                 epochIndex=foldIndex,
@@ -1779,17 +1764,14 @@ class SmORFCNN(nn.Module):
 
             foldMetrics.append(metrics)
 
-            # Keep best-by-F1 weights across folds
             if metrics["f1"] > bestFoldF1:
                 bestFoldF1 = metrics["f1"]
                 bestFold = foldIndex
                 bestFoldState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
 
-            # Update fold-level tqdm postfix
             if 'tqdm' in locals():
                 iterator.set_postfix_str(f"F1 {metrics['f1']:.4f}  AUC {metrics.get('roc_auc', float('nan')):.4f}")
 
-        # ---------- G) Restore the best fold checkpoint ----------
         if bestFoldState is not None:
             self.load_state_dict(bestFoldState)
             self.to(self.device)
@@ -1886,7 +1868,7 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,768,"features.pt")
+mymodel = SmORFCNN(4,768,"features.pt",debug=True)
 mymodel.initializeDataset()
 mymodel.fit(
     mymodel.trainDataLoader,
