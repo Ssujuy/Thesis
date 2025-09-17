@@ -151,7 +151,6 @@ class ConvolutionBlock(nn.Module):
             bias=False
         )
 
-        self.batchNormalization = nn.BatchNorm1d(outputChannels)
         self.activation = Types.activationFunctionMapping.get(activation)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -176,7 +175,6 @@ class ConvolutionBlock(nn.Module):
 
         self._debugIn(x)
         x = self.conv1d(x)
-        x = self.batchNormalization(x)
         x = self.activation(x)
         x = self.dropout(x)
         self._debugOut(x)
@@ -1188,7 +1186,7 @@ class SmORFCNN(nn.Module):
         # When TemporalHead is OFF, we pool directly. Each branch contributes 2*C_branch,
         # where C_branch is MultiKernel out_ch if multiKernel=True, else the raw input channels.
 
-        temporalHeadDim = (4 * self.temporalHeadOutputChannels) * int(self.temporalHead)
+        temporalHeadDim = (2 * self.temporalHeadOutputChannels) * int(self.temporalHead)
 
         if self.temporalHead:
             poolingNoTemporalDim = 0
@@ -1201,7 +1199,7 @@ class SmORFCNN(nn.Module):
 
         multiKernelDim = 0
 
-        return temporalHeadDim + multiKernelDim + poolingNoTemporalDim
+        return temporalHeadDim + multiKernelDim + poolingNoTemporalDim + 768
 
     def _optimizerInit(self) -> torch.optim.Optimizer:
         """
@@ -1287,19 +1285,20 @@ class SmORFCNN(nn.Module):
 
         features.append(inputOneHot)
 
-        if self.multiKernel:
-            inputEmbeddings = self.embeddingsMultiKernelClass(inputEmbeddings)
+        # if self.multiKernel:
+        #     inputEmbeddings = self.embeddingsMultiKernelClass(inputEmbeddings)
 
-        if self.temporalHead:
-            inputEmbeddings = self.embeddingsTemporalClass(inputEmbeddings, maskEmbeddings)
+        # if self.temporalHead:
+        #     inputEmbeddings = self.embeddingsTemporalClass(inputEmbeddings, maskEmbeddings)
 
-        else:
-            inputEmbeddings = torch.cat([
-                    Helpers.globalMaxPooling(inputEmbeddings, maskEmbeddings),
-                    Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
-                dim=1
-            )
+        # else:
+        #     inputEmbeddings = torch.cat([
+        #             Helpers.globalMaxPooling(inputEmbeddings, maskEmbeddings),
+        #             Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
+        #         dim=1
+        #     )
 
+        inputEmbeddings = xEmbeddings.squeeze(-1)
         self._debugEmbeddings(inputEmbeddings)
 
         features.append(inputEmbeddings)
@@ -1873,5 +1872,5 @@ mymodel.initializeDataset()
 mymodel.fit(
     mymodel.trainDataLoader,
     mymodel.validationDataLoader,
-    5
+    2
 )
