@@ -145,7 +145,7 @@ class DNABERT6:
         print(f"Initialized Training Dataset: {self.trainDataset.shape}")
         print(f"Initialized Validation Dataset: {self.validationDataset.shape}")
 
-    def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState):
+    def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState, specialTokensMask=None):
         """
         hidden : (B, L, 768) - last_hidden_state from DNABERT
         
@@ -165,17 +165,20 @@ class DNABERT6:
             return hidden[:, 0, :]
         
         elif state == Types.HiddenState.MEAN:
+            # --- NEW: build valid mask = attention_mask & ~special_tokens_mask (exclude CLS/SEP/PAD) ---
+            if specialTokensMask is not None:
+                valid = (attentionMask.bool() & (~specialTokensMask.bool()))
+            else:
+                # fallback: exclude CLS only, keep using attentionMask to drop PAD
+                # (keeps previous behavior if special mask wasn't provided)
+                valid = attentionMask.bool()
+                valid[:, 0] = False  # drop CLS
 
-            # mask : (B, L, 1) → 1 for real tokens, 0 for padding
-            mask = attentionMask.unsqueeze(-1)
+            M = valid.to(dtype=hidden.dtype).unsqueeze(-1)    # (B,L,1)
 
-            # exclude [CLS] column (index 0)
-            real = hidden[:, 1:, :] * mask[:, 1:, :]     # zero-out pads
-
-            summed = real.sum(1)                           # (B, 768)
-            counts = mask[:, 1:, :].sum(1).clamp(min=1e-9) # (B, 1)
-            mean = summed / counts                       # (B, 768)
-
+            summed  = (hidden * M).sum(dim=1)                 # (B,768)
+            counts  = M.sum(dim=1).clamp_min(1e-9)            # (B,1)
+            mean    = summed / counts
             return mean
 
         elif state == Types.HiddenState.BOTH:
@@ -249,7 +252,8 @@ class DNABERT6:
             is_split_into_words=True,
             truncation=True,
             padding="max_length",
-            max_length=self.windowSize
+            max_length=self.windowSize,
+            return_special_tokens_mask=True
         )
 
     def finetune(self, **override) -> None:
@@ -314,13 +318,15 @@ class DNABERT6:
                     truncation=True,
                     padding="max_length",
                     max_length=self.windowSize,
-                    return_tensors="pt"
+                    return_tensors="pt",
+                    return_special_tokens_mask=True
                 ).to(self.device)
 
                 attentionMask = toks["attention_mask"]
+                specialTokensMask  = toks["special_tokens_mask"]
                                 
-                hidden = self.model.base_model(**toks).last_hidden_state
-                pooled = self._poolHidden(hidden, attentionMask, self.hiddenState)
+                hidden = self.model.base_model(input_ids=toks["input_ids"], attention_mask=attentionMask).last_hidden_state
+                pooled = self._poolHidden(hidden, attentionMask, self.hiddenState, specialTokensMask)
 
                 if self.linear is not None:
                     pooled = F.relu(self.linear(pooled))

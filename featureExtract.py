@@ -137,7 +137,7 @@ if __name__ == "__main__":
     emb.add_argument("--saveFeaturesPath", type=str, required=True)
     emb.add_argument("--projectionState", type=int, choices=[0, 1, 2], default=0, help="0=no projection, 1=frozen (non-trainable) projection, 2=trainable projection.")
     emb.add_argument("--projectionDimension", type=int, default=None, help="Size of the embeddings projection.")
-    emb.add_argument("--hiddenState", type=str, choices=["cls", "mean", "both"], default='cls', help="Pooling: 'cls', 'mean', or 'both'.")
+    emb.add_argument("--hiddenState", type=str, choices=["cls", "mean", "both"], default='both', help="Pooling: 'cls', 'mean', or 'both'.")
 
     args = parser.parse_args()
 

@@ -67,9 +67,11 @@ class ConvolutionBlock(nn.Module):
 
     Methods
     ----------
-    forward(x : Tensor) -> Tensor:
+    forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
         Passes input x through convolution, batch normalization, activation and dropout.\n
-        Returns a Tensor with the output of size outputChannels.
+        Then passes mask across the same convolution block and updates the mask, then\n
+        x is multiplied by the mask to mark padded positions so they dont produce features.\n
+        Returns tuple of y, mask.
 
     print():
         Prints member variables of the class and number of model parameters and trainable model parameters.
@@ -81,11 +83,12 @@ class ConvolutionBlock(nn.Module):
             outputChannels: int,
             kernel: int,
             stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
-            padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
+            padding: str                = Types.DEFAULT_CONVOLUTION_PADDING,
             dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
             groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
             dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
+            bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
@@ -120,6 +123,9 @@ class ConvolutionBlock(nn.Module):
 
         dropout : float
             Zeros activations to reduce co-adaptation and overfitting.
+        
+        bias : bool
+            If True, adds a learnable bias to the output.
 
         debug : bool
             Turns debug mode on when true (more information).
@@ -136,9 +142,7 @@ class ConvolutionBlock(nn.Module):
         self.groups = groups
         self.activation = activation
         self.dropout = dropout
-
-        if self.padding is None:
-            self.padding = (dilation * (kernel - 1)) // 2       # "Same" padding for odd kernels under given dilation.
+        self.bias = bias
 
         self.conv1d = nn.Conv1d(
             self.inputChannels,
@@ -148,8 +152,10 @@ class ConvolutionBlock(nn.Module):
             padding=self.padding,
             dilation=self.dilation,
             groups=self.groups,
-            bias=False
+            bias=self.bias
         )
+
+        self.register_buffer("maskKernel", torch.ones(1, 1, kernel, dtype=torch.float32))
 
         self.activation = Types.activationFunctionMapping.get(activation)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
@@ -157,10 +163,47 @@ class ConvolutionBlock(nn.Module):
         self.modelParams = sum(p.numel() for p in self.parameters())
         self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    @torch.no_grad()
+    def _updateMask(self, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Passes mask tensor through convolution with kernel=maskKernel (1,1,1).\n
+        Then uses convolution.eq to compare every element of convolution to the scalar self.kernel.
+
+        Parameters
+        ----------
+        mask : Tensor
+            Mask Tensor.
+
+        Return
+        ----------
+        Tensor
+            Updated mask after convolution.eq.
+        """
+        if mask is None:
+            raise ValueError("mask tensor is None")
+
+        if not isinstance(mask, torch.Tensor):
+            raise TypeError("Mask argument given is not a Tensor")
+
+        mask = mask.float()
+
+        convolution = F.conv1d(
+            mask,
+            self.maskKernel,
+            stride=self.stride,
+            padding=0,
+            dilation=self.dilation
+        )
+
+        mask = convolution.eq(float(self.kernel)).squeeze(1)
+        return mask
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Passes input x through convolution, batch normalization, activation and dropout.\n
-        Returns a Tensor with the output of size outputChannels.
+        Updates the mask of input x then multiplies the output after convolution with mask\n
+        and multiply again the output after activation and dropout.\n
+        Returns a Tensor with the output of size outputChannels and mask with 1 as positions without pad.
 
         Parameters
         ----------
@@ -169,16 +212,25 @@ class ConvolutionBlock(nn.Module):
 
         Return
         ----------
-        Tensor
-            Output Tensor after convolution, batch normalization, activation and dropout.
+        tuple[Tensor, Tensor]
+            Output Tensor and mask Tensor after convolution.  
         """
+        
+        if not isinstance(mask, torch.Tensor) or not isinstance(x, torch.Tensor):
+            raise TypeError("Input x or mask arguments given is not a Tensor")
+
+        if x is None or mask is None:
+            raise ValueError("Input x or mask tensor is None")
 
         self._debugIn(x)
-        x = self.conv1d(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-        self._debugOut(x)
-        return x
+        y = self.conv1d(x)
+        updatedMask = self._updateMask(mask)
+        y = y * updatedMask.unsqueeze(1)
+        y = self.activation(y)
+        y = self.dropout(y)
+        y = y * updatedMask.unsqueeze(1)
+        self._debugOut(y)
+        return y, updatedMask
 
     def print(self) -> None:
         """
@@ -194,6 +246,8 @@ class ConvolutionBlock(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
+        print(f" - Bias: {self.bias}")
+        print(f" - Debug Mode: {self.debugMode}")
         print(f" - Model Parameters: {self.modelParams}")
         print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
@@ -264,8 +318,11 @@ class ResidualBlock(nn.Module):
         Activation function to use, configurable for testing.
 
     dropout : float
-        Zeros activations to reduce co-adaptation and overfitting.    
-    
+        Zeros activations to reduce co-adaptation and overfitting.
+
+    bias : bool
+        If True, adds a learnable bias to the output.
+
     convolution1 : ConvolutionBlock
         First Convolution block to compute convolution1(x).
 
@@ -280,9 +337,11 @@ class ResidualBlock(nn.Module):
 
     Methods
     ----------
-    forward(x : Tensor) -> Tensor:
-        Passes input x through convolution, batch normalization, activation and dropout.\n
-        Returns a Tensor with the output of size outputChannels.
+    forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
+        Computes Residual mapping. First computes convolution1(x, mask),\n
+        then convolution2(y1, m1) taken from convolution1 output,\n
+        finally x + y2, which is x + convolution2(convolution1(x)) and multiply by the final mask (m2).\n
+        Then returns the output Tensor and output mask Tensor.
 
     print():
         Prints member variables of the class and number of model parameters and trainable model parameters.
@@ -294,11 +353,12 @@ class ResidualBlock(nn.Module):
             outputChannels: int,
             kernel: int,
             stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
-            padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
+            padding: str                = Types.DEFAULT_CONVOLUTION_PADDING,
             dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
             groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
             dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
+            bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
@@ -333,6 +393,9 @@ class ResidualBlock(nn.Module):
 
         dropout : float
             Zeros activations to reduce co-adaptation and overfitting.
+        
+        bias : bool
+            If True, adds a learnable bias to the output.
 
         debug : bool
             Turns debug mode on when true (more information).
@@ -349,6 +412,7 @@ class ResidualBlock(nn.Module):
         self.groups = groups
         self.activation = activation
         self.dropout = dropout
+        self.bias = bias
 
         self.convolution1 = ConvolutionBlock(
             self.inputChannels,
@@ -359,7 +423,9 @@ class ResidualBlock(nn.Module):
             dilation=self.dilation,
             groups=self.groups,
             activation=self.activation,
-            dropout=self.dropout
+            dropout=self.dropout,
+            bias=self.bias,
+            debug=self.debugMode
         )
 
         self.convolution2 = ConvolutionBlock(
@@ -371,32 +437,50 @@ class ResidualBlock(nn.Module):
             dilation=self.dilation,
             groups=self.groups,
             activation=self.activation,
-            dropout=self.dropout
+            dropout=self.dropout,
+            bias=self.bias,
+            debug=self.debugMode
         )
 
         self.modelParams = sum(p.numel() for p in self.parameters())
         self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Computes Residual mapping. First computes convolution1(x), then convolution2(convolution1(x))\n
-        and finally x + convolution2(convolution1(x)). Then returns the output.
+        Computes Residual mapping. First computes convolution1(x, mask),\n
+        then convolution2(y1, m1) taken from convolution1 output,\n
+        finally x + y2, which is x + convolution2(convolution1(x)) and multiply by the final mask (m2).\n
+        Then returns the output Tensor and output mask Tensor.
 
         Parameters
         ----------
         x : Tensor
             Input Tensor.
+        
+        mask : Tensor
+            Mask Tensor.
 
         Return
         ----------
-        Tensor
-            Output Tensor after Residual Mapping.
+        tuple[Tensor, Tensor]
+            Output Tensor and mask Tensor after Residual Mapping.
         """
 
-        self._debugIn(x)
-        out = x + self.convolution2(self.convolution1(x))
-        self._debugOut(out)
-        return out
+        if not isinstance(mask, torch.Tensor) or not isinstance(x, torch.Tensor):
+            raise TypeError("Input x or mask arguments given is not a Tensor")
+
+        if x is None or mask is None:
+            raise ValueError("Input x or mask tensor is None")
+
+        y1, m1 = self.convolution1(x, mask)
+        y2, m2 = self.convolution2(y1, m1)
+
+        x = x[..., :y2.size(-1)]
+        x = x * m2.unsqueeze(1)
+
+        out = (x + y2) * m2.unsqueeze(1)
+
+        return out, m2
 
     def print(self) -> None:
         """
@@ -412,6 +496,8 @@ class ResidualBlock(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
+        print(f" - Bias: {self.bias}")
+        print(f" - Debug mode: {self.debugMode}")
         print(f" - Model Parameters: {self.modelParams}")
         print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
@@ -444,7 +530,7 @@ class ResidualBlock(nn.Module):
 
 class MultiKernelConvolution(nn.Module):
     """
-    Parallel Convolution Bloks with different kernel widths, to capture short motifs (codons, start/stop) and longer context.
+    Parallel Convolution Blocks with different kernel widths, to capture short motifs (codons, start/stop) and longer context.
 
     Attributes
     ----------
@@ -479,7 +565,10 @@ class MultiKernelConvolution(nn.Module):
         Activation function to use, configurable for testing.
 
     dropout : float
-        Zeros activations to reduce co-adaptation and overfitting.    
+        Zeros activations to reduce co-adaptation and overfitting.
+
+    bias : bool
+        If True, adds a learnable bias to the output.
 
     branches : ModuleList
         List of Convolution Blocks with different kernel value, with length equal to kernelList length.
@@ -492,9 +581,11 @@ class MultiKernelConvolution(nn.Module):
 
     Methods
     ----------
-    forward(x : Tensor) -> Tensor:
-        Passes input x through convolution, batch normalization, activation and dropout.\n
-        Returns a Tensor with the output of size outputChannels.
+    forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
+        Compute convolution with different kernel widths. Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).\n
+        Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.\n
+        Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.\n
+        Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min)
 
     print():
         Prints member variables of the class and number of model parameters and trainable model parameters.
@@ -503,14 +594,15 @@ class MultiKernelConvolution(nn.Module):
     def __init__(
             self,
             inputChannels: int,
-            outputChannelsKernel: int   = Types.DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUTCH,
+            outputChannelsKernel: int   = Types.DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUT,
             kernelList: list            = Types.DEFAULT_MULTI_KERNEL_KERNEL_LIST,
             stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
-            padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
+            padding: str                = Types.DEFAULT_CONVOLUTION_PADDING,
             dilation: int               = Types.DEFAULT_CONVOLUTION_DILATION,
             groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
             dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
+            bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()
@@ -546,6 +638,9 @@ class MultiKernelConvolution(nn.Module):
         dropout : float
             Zeros activations to reduce co-adaptation and overfitting.
 
+        bias : bool
+            If True, adds a learnable bias to the output.
+
         debug : bool
             Turns debug mode on when true (more information).
         """
@@ -561,6 +656,7 @@ class MultiKernelConvolution(nn.Module):
         self.groups = groups
         self.activation = activation
         self.dropout = dropout
+        self.bias = bias
 
         self.branches = nn.ModuleList()
 
@@ -574,7 +670,9 @@ class MultiKernelConvolution(nn.Module):
                 dilation=self.dilation,
                 groups=self.groups,
                 activation=self.activation,
-                dropout=self.dropout
+                dropout=self.dropout,
+                bias=self.bias,
+                debug=self.debugMode
             )
             self.branches.append(conv)
         
@@ -583,10 +681,12 @@ class MultiKernelConvolution(nn.Module):
         self.modelParams = sum(p.numel() for p in self.parameters())
         self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute convolution and draw features for each Convolution Block in branches,\n
-        then concatenate its outputs and return them.
+        Compute convolution with different kernel widths. Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).\n
+        Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.\n
+        Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.\n
+        Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min)
 
         Parameters
         ----------
@@ -595,23 +695,32 @@ class MultiKernelConvolution(nn.Module):
 
         Return
         ----------
-        Tensor
-            Output Tensor after Residual Mapping.
+        tuple[Tensor, Tensor]
+            Output Tensor and mask Tensor after multiple convolution with different kernel size.
         """
 
-        output = []
+        outputs = []
+        masks = []
 
         self._debugIn(x)
 
         for branch in self.branches:
-            b = branch(x)
-            output.append(b)
+            y, m = branch(x, mask)
+            outputs.append(y)
+            masks.append(m)
+            self._debugBranch(y)
 
-            self._debugBranch(b)
+        Lmin = min(y.size(-1) for y in outputs)
+        outputs = [y[..., :Lmin] for y in outputs]
+        masks   = [m[..., :Lmin] for m in masks]
 
-        out = torch.cat(output, dim=1)
+        out = torch.cat(outputs, dim=1)
+        combined_mask = masks[0]
+        for m in masks[1:]:
+            combined_mask = combined_mask | m
+
         self._debugOut(out)
-        return out
+        return out, combined_mask
 
     def print(self) -> None:
         """
@@ -628,6 +737,8 @@ class MultiKernelConvolution(nn.Module):
         print(f" - Groups: {self.groups}")
         print(f" - Activation: {self.activation}")
         print(f" - Dropout: {self.dropout}")
+        print(f" - Bias: {self.bias}")
+        print(f" - Debug mode: {self.debugMode}")
         print(f" - Model Parameters: {self.modelParams}")
         print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
     
@@ -671,6 +782,79 @@ class MultiKernelConvolution(nn.Module):
             print(f"[MultiKernelConv] concat out shape={tuple(out.shape)}")
             self.forwardDebugOnce = False
 
+# class MultiGapKernelConvolution(nn.Module):
+#     """
+#     """
+#     def __init__(
+#         self,
+#         inputChannels,
+#         outputChannelsBranch:int,
+#         kernelList: list          = Types.DEFAULT_TEMPORAL_KERNEL_RESIDUAL,
+#         gapList: list        = Types.DEFAULT_TEMPORAL_KERNEL_REDUCTION,
+#         stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
+#         padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
+#         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
+#         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
+#         dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
+#         debug: bool                 = Types.DEFAULT_DEBUG_MODE
+#         ):
+#         super().__init__()
+
+#         self.inputChannels = inputChannels
+#         self.outputChannelsBranch = outputChannelsBranch
+#         self.kernelList = kernelList
+#         self.gapList = gapList
+#         self.stride = stride
+#         self.padding = padding
+#         self.groups = groups
+#         self.activation = activation
+#         self.dropout = dropout
+#         self.debugMode = debug
+
+#         self.branches = nn.ModuleList()
+#         self.pairs = []
+
+#         for k in kernelList:
+#             for g in gapList:
+#                 dil = g + 1
+#                 self.branches.append(
+#                     ConvolutionBlock(
+#                         inputChannels=self.inputChannels,
+#                         outputChannels=self.outputChannelsBranch,
+#                         kernel=k,
+#                         stride=self.stride,
+#                         padding=self.padding,
+#                         dilation=dil,
+#                         groups=self.groups,
+#                         activation=self.activation,
+#                         dropout=self.dropout,
+#                         debug=self.debugMode,
+#                     )
+#                 )
+#                 self.pairs.append((k, g))
+
+#         self.outputChannels = self.outputChannelsBranch * len(self.branches)
+
+#     def forward(self, x: torch.Tensor, mask: torch.Tensor):
+#         # Collect per-branch outputs and masks
+#         ys, ms = [], []
+#         for block in self.branches:
+#             y, m = block(x, mask)    # y:[B,C,L_k,g], m:[B,L_k,g]
+#             ys.append(y); ms.append(m)
+
+#         # Align lengths: crop all to the minimum L
+#         Lmin = min(y.size(-1) for y in ys)
+#         ys = [y[..., :Lmin] for y in ys]
+#         ms = [m[..., :Lmin] for m in ms]
+
+#         # Concatenate channels and AND the masks across branches
+#         y_cat = torch.cat(ys, dim=1)    # [B, C_total, Lmin]
+#         m_cat = ms[0]
+#         for m in ms[1:]:
+#             m_cat = (m_cat & m)
+
+#         return y_cat, m_cat
+
 class TemporalHead(nn.Module):
     """
     Temporal Head Class implements a size reduction of the input channel using a Convolution Block,\n
@@ -707,7 +891,10 @@ class TemporalHead(nn.Module):
         Activation function to use, configurable for testing.
 
     dropout : float
-        Zeros activations to reduce co-adaptation and overfitting.    
+        Zeros activations to reduce co-adaptation and overfitting.  
+
+    bias : bool
+        If True, adds a learnable bias to the output.
 
     multipleDilation : bool
         Flag to activate different dilations for each Residual stack item.
@@ -729,7 +916,7 @@ class TemporalHead(nn.Module):
 
     Methods
     ----------
-    forward(x : Tensor) -> Tensor:
+    forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
         Passes input x through convolution, batch normalization, activation and dropout.\n
         Returns a Tensor with the output of size outputChannels.
 
@@ -748,6 +935,7 @@ class TemporalHead(nn.Module):
         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
         dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
+        bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
         multipleDilation: bool      = Types.DEFAULT_TEMPORAL_MULTI_DILATION,
         residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB,
         debug: bool                 = Types.DEFAULT_DEBUG_MODE
@@ -786,6 +974,9 @@ class TemporalHead(nn.Module):
         dropout : float
             Zeros activations to reduce co-adaptation and overfitting.
 
+        bias : bool
+            If True, adds a learnable bias to the output.
+
         multipleDilation : bool
             Flag to activate different dilations for each Residual stack item.
 
@@ -807,6 +998,7 @@ class TemporalHead(nn.Module):
         self.groups = groups
         self.activation = activation
         self.dropout = dropout
+        self.bias = bias
         self.multipleDilation = multipleDilation
         self.residualBlocks = residualBlocks
 
@@ -819,7 +1011,9 @@ class TemporalHead(nn.Module):
             dilation=Types.DEFAULT_CONVOLUTION_DILATION,
             groups=self.groups,
             activation=self.activation,
-            dropout=self.dropout
+            dropout=self.dropout,
+            bias=self.bias,
+            debug=self.debugMode
         )
 
         blocks = []
@@ -837,19 +1031,22 @@ class TemporalHead(nn.Module):
                     dilation=dilation,
                     groups=self.groups,
                     activation=self.activation,
-                    dropout=self.dropout
+                    dropout=self.dropout,
+                    bias=self.bias,
+                    debug=self.debugMode
                 )
             )       
         
-        self.residualBlocks = nn.Sequential(*blocks)
+        self.residualBlocks = nn.ModuleList(blocks)
 
         self.modelParams = sum(p.numel() for p in self.parameters())
         self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
-        Passes input Tensor to reduce (Conv Block) and project to 128 size.\n
+        Passes input Tensor to reduce (Conv Block) and project to smaller size.\n
         Then passes reduced input to Residual Blocks sequentially for residualBlocks number.\n
+        Mask is also passed to both reduction and residual block.\n
         Finally, calculates global max pooling and global average pooling, then concatenates.
 
         Parameters
@@ -868,23 +1065,22 @@ class TemporalHead(nn.Module):
 
         self._debugIn(x, mask)
 
-        x = self.reduce(x)
+        x, m = self.reduce(x, mask)
 
         self._debugReduce(x)
 
-        x = self.residualBlocks(x)
+        for block in self.residualBlocks:
+            x, m = block(x, m)
 
         self._debugRes(x)
 
-        gmp = Helpers.globalMaxPooling(x, mask)
-        gap = Helpers.globalAveragePooling(x, mask)
+        gmp = Helpers.globalMaxPooling(x, m)
+        gap = Helpers.globalAveragePooling(x, m)
 
         self._debugPooling(gmp,gap)
 
-        out = torch.cat([gmp, gap], dim=1)
-
+        out = torch.cat([gap,gmp], dim=1)
         self._debugOut(out)
-
         return out
 
     def print(self) -> None:
@@ -1015,13 +1211,17 @@ class SmORFCNN(nn.Module):
         temporalHead: bool                      = Types.DEFAULT_SMORFCNN_TEMPORAL_HEAD,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         onehotKernelList: list                  = Types.DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST,
-        embeddingsKernelList: list              = Types.DEFAULT_SMORFCNN_EMBEDDINGS_KERNEL_LIST,
         outputChannelsKernel: int               = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
         temporalHeadOutputChannels: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL,
         residualBlocks: int                     = Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS,
         dropout: float                          = Types.DEFAULT_SMORFCNN_DROPOUT,
+        bias: bool                              = Types.DEFAULT_CONVOLUTION_BIAS,
         classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
-        classifierOutput: int                   = Types.DEFAULT_SMORFCNN_CLASSIFIER_OUTPUT,
+        layer1Output: int                       = Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT,
+        layer1Dropout: float                    = Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_DROPOUT,
+        layer2Input: int                        = Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_INPUT,
+        layer2Output: int                       = Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_OUTPUT,
+        layer2Dropout: float                    = Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_DROPOUT,
         learningRate: float                     = Types.DEFAULT_SMORFCNN_LEARNING_RATE,
         weightDecay: float                      = Types.DEFAULT_SMORFCNN_WEIGHT_DECAY,
         eps: float                              = Types.DEFAULT_SMORFCNN_EPS,
@@ -1029,7 +1229,10 @@ class SmORFCNN(nn.Module):
         factor: float                           = Types.DEFAULT_SMORFCNN_FACTOR,
         patience: int                           = Types.DEFAULT_SMORFCNN_PATIENCE,
         minLearningRate: float                  = Types.DEFAULT_SMORFCNN_MINIMUM_LEARNING_RATE,
+        schedulerFactor: float                  = Types.DEFAULT_SMORFCNN_SCHEDULER_FACTOR,
+        schedulerWarmup: float                  = Types.DEFAULT_SMORFCNN_SCHEDULER_WARMUP,
         threshold: float                        = Types.DEFAULT_SMORFCNN_THRESHOLD,
+        maxGradNorm: float                      = Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
         seed: int                               = Types.DEFAULT_SMORFCNN_SEED,
         deterministic: bool                     = Types.DEFAULT_SMORFCNN_DETERMINISTIC,
         device: str                             = Types.DEFAULT_SMORFCNN_DEVICE,
@@ -1050,6 +1253,96 @@ class SmORFCNN(nn.Module):
         self.deterministic = deterministic
         self.device = device
         self.featuresPath = featuresPath
+
+        self._initializeEnvironment()
+
+        self.onehotInputChannels = onehotInputChannels
+        self.embeddingsInputChannels =  embeddingsInputChannels
+
+        self.temporalHead = temporalHead
+        self.multiKernel = multiKernel
+        self.onehotKernelList = onehotKernelList
+        self.outputChannelsKernel = outputChannelsKernel
+        self.temporalHeadOutputChannels = temporalHeadOutputChannels
+        self.residualBlocks = residualBlocks
+        self.dropout = dropout
+        self.bias = bias
+        self.layer1Output = layer1Output
+        self.layer1Dropout = layer1Dropout
+        self.layer2Input = layer2Input
+        self.layer2Output = layer2Output
+        self.layer2Dropout = layer2Dropout
+        self.classes = classes
+        self.learningRate = learningRate
+        self.weightDecay = weightDecay
+        self.eps = eps
+        self.betas = betas
+        self.factor = factor
+        self.patience = patience
+        self.minLearningRate = minLearningRate
+        self.schedulerFactor = schedulerFactor
+        self.schedulerWarmpup = schedulerWarmup
+        self.threshold = threshold
+        self.maxGradNorm = maxGradNorm
+        self.trainBatchSize = trainBatchSize
+        self.validationBatchSize = valBatchSize
+        self.testBatchSize = testBatchSize
+        self.trainSplit = trainSplit
+        self.validationSplit = valSplit
+        self.testSplit = testSplit
+        self.epochs = epochs
+
+        self.onehotMultiKernelClass = None
+        self.onehotTemporalClass = None
+
+        if self.multiKernel:
+            self.onehotMultiKernelClass = MultiKernelConvolution(
+                inputChannels=self.onehotInputChannels,
+                outputChannelsKernel=self.outputChannelsKernel,
+                kernelList=self.onehotKernelList,
+                dropout=self.dropout,
+                bias=self.bias
+            )
+            
+        if self.temporalHead:
+            self.onehotTemporalClass = TemporalHead(
+                self.onehotMultiKernelClass.outputChannels,
+                hiddenChannels=self.temporalHeadOutputChannels,
+                residualBlocks=self.residualBlocks,
+                dropout=self.dropout,
+                bias=self.bias
+            )
+
+        self.fusedDim = self._calculateFusedDim()
+
+        self.classifier = nn.Sequential(
+            nn.Linear(self.fusedDim, self.layer1Output),
+            nn.GELU(),
+            nn.Dropout(self.layer1Output),
+
+            nn.Linear(self.layer2Input, self.layer2Output),
+            nn.GELU(),
+            nn.Dropout(self.layer2Dropout),
+
+            nn.Linear(self.layer2Output, self.classes)
+        )
+
+        self.optimizer = self._optimizerInit()
+        #self.scheduler = self._schedulerInit()
+
+        self.modelParams = sum(p.numel() for p in self.parameters())
+        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+        self._debugInit()
+
+        self.trainDataLoader = None
+        self.validationDataLoader = None
+        self.testDataLoader = None
+
+        self.to(self.device)
+
+    def _initializeEnvironment(self):
+
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
         os.environ["PYTHONHASHSEED"] = str(self.seed)
@@ -1068,93 +1361,6 @@ class SmORFCNN(nn.Module):
                 pass
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
-
-        self.onehotInputChannels = onehotInputChannels
-        self.embeddingsInputChannels =  embeddingsInputChannels
-
-        self.temporalHead = temporalHead
-        self.multiKernel = multiKernel
-        self.onehotKernelList = onehotKernelList
-        self.embeddingsKernelList = embeddingsKernelList
-        self.outputChannelsKernel = outputChannelsKernel
-        self.temporalHeadOutputChannels = temporalHeadOutputChannels
-        self.residualBlocks = residualBlocks
-        self.dropout = dropout
-        self.classes = classes
-        self.classifierOutput = classifierOutput
-        self.learningRate = learningRate
-        self.weightDecay = weightDecay
-        self.eps = eps
-        self.betas = betas
-        self.factor = factor
-        self.patience = patience
-        self.minLearningRate = minLearningRate
-        self.threshold = threshold
-        self.trainBatchSize = trainBatchSize
-        self.validationBatchSize = valBatchSize
-        self.testBatchSize = testBatchSize
-        self.trainSplit = trainSplit
-        self.validationSplit = valSplit
-        self.testSplit = testSplit
-        self.epochs = epochs
-
-        self.onehotMultiKernelClass = None
-        self.onehotTemporalClass = None
-        self.embeddingsMultiKernelClass = None
-        self.embeddingsTemporalClass = None
-
-        if self.multiKernel:
-            self.onehotMultiKernelClass = MultiKernelConvolution(
-                inputChannels=self.onehotInputChannels,
-                outputChannelsKernel=self.outputChannelsKernel,
-                kernelList=self.onehotKernelList,
-                dropout=self.dropout
-            )
-            
-        if self.temporalHead:
-            self.onehotTemporalClass = TemporalHead(
-                self.onehotMultiKernelClass.outputChannels,
-                hiddenChannels=self.temporalHeadOutputChannels,
-                residualBlocks=self.residualBlocks,
-                dropout=self.dropout
-            )
-
-        if self.multiKernel:
-            self.embeddingsMultiKernelClass = MultiKernelConvolution(
-                inputChannels=self.embeddingsInputChannels,
-                outputChannelsKernel=self.outputChannelsKernel,
-                kernelList=self.embeddingsKernelList,
-                dropout=self.dropout
-            )
-
-        if self.temporalHead:
-            self.embeddingsTemporalClass = TemporalHead(
-                inputChannels=self.embeddingsMultiKernelClass.outputChannels,
-                hiddenChannels=self.temporalHeadOutputChannels,
-                residualBlocks=self.residualBlocks,
-                dropout=self.dropout
-            )
-
-        self.fusedDim = self._calculateFusedDim()
-
-        self.classifier = nn.Sequential(
-            nn.Linear(self.fusedDim, self.classifierOutput),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(self.classifierOutput, self.classes)
-        )
-
-        self.optimizer = self._optimizerInit()
-        self.scheduler = self._schedulerInit()
-
-        self.modelParams = sum(p.numel() for p in self.parameters())
-        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
-
-        self._debugInit()
-
-        self.trainDataLoader = None
-        self.validationDataLoader = None
-        self.testDataLoader = None
 
     def initializeDataset(self) -> None:
 
@@ -1199,7 +1405,7 @@ class SmORFCNN(nn.Module):
 
         multiKernelDim = 0
 
-        return temporalHeadDim + multiKernelDim + poolingNoTemporalDim + 768
+        return 2560 
 
     def _optimizerInit(self) -> torch.optim.Optimizer:
         """
@@ -1223,16 +1429,54 @@ class SmORFCNN(nn.Module):
         ]
 
         return torch.optim.AdamW(parameterGroups, lr=self.learningRate, betas=self.betas, eps=self.eps)
-    
+
+    @staticmethod
+    def _best_threshold_for_f1(probs: torch.Tensor, targets: torch.Tensor):  # NEW
+        # probs, targets on CPU 1D
+        p = probs.view(-1).float().numpy()
+        y = targets.view(-1).long().numpy()
+        # candidate thresholds: sorted unique probabilities (plus endpoints)
+        thr = np.unique(p)
+        thr = np.concatenate(([0.0], thr, [1.0]))
+        # vectorized F1 sweep
+        best_f1, best_t = 0.0, 0.5
+        # To keep it simple and fast, sample at most 2048 thresholds
+        if thr.size > 2048:
+            thr = np.linspace(0.0, 1.0, 2048, dtype=np.float64)
+        for t in thr:
+            yhat = (p >= t).astype(np.int32)
+            tp = (yhat & (y == 1)).sum()
+            fp = (yhat & (y == 0)).sum()
+            fn = ((1 - yhat) & (y == 1)).sum()
+            denom = (2*tp + fp + fn)
+            f1 = (2*tp) / denom if denom > 0 else 0.0
+            if f1 > best_f1:
+                best_f1, best_t = f1, float(t)
+        return best_t, best_f1
+
+
     def _schedulerInit(self) -> torch.optim.lr_scheduler:
 
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+        if self.trainDataLoader is None:
+            AttributeError("Traindataloader must be initialized to calculate size")
+
+        stepsPerEpoch = len(self.trainingDataloader)
+        totalSteps = stepsPerEpoch * self.epochs
+        warmupSteps = int(self.schedulerWarmpup * totalSteps)
+        cosineSteps = totalSteps - warmupSteps
+
+        warmup = lrScheduler.LinearLR(
+            self.optimizer, start_factor=self.schedulerFactor, total_iters=warmupSteps
+        )
+        cosine = lrScheduler.CosineAnnealingLR(
+            self.optimizer, T_max=cosineSteps, eta_min=self.minLearningRate
+        )
+
+        return lrScheduler.SequentialLR(
             self.optimizer,
-            mode="min",
-            factor=self.factor,
-            patience=self.patience,
-            min_lr=self.minLearningRate,
-        )        
+            schedulers=[warmup, cosine],
+            milestones=[warmupSteps]
+        )    
 
     def forward(
         self,
@@ -1267,41 +1511,16 @@ class SmORFCNN(nn.Module):
             raise AttributeError("Did not receive dnabert6 embeddings input!")
 
         if self.multiKernel:
-            inputOneHot = self.onehotMultiKernelClass(inputOneHot)
+            inputOneHot, maskMKC = self.onehotMultiKernelClass(inputOneHot, maskOnehot)
 
         if self.temporalHead:
-            inputOneHot = self.onehotTemporalClass(inputOneHot, maskOnehot)
-            
-        else:
-            inputOneHot = torch.cat(
-                [
-                    Helpers.globalMaxPooling(inputOneHot, maskOnehot),
-                    Helpers.globalAveragePooling(inputOneHot, maskOnehot)
-                ],
-                    dim=1
-            )  
-
+            inputOneHot = self.onehotTemporalClass(inputOneHot, maskMKC)
+        
         self._debugOnehot(inputOneHot)
 
         features.append(inputOneHot)
 
-        # if self.multiKernel:
-        #     inputEmbeddings = self.embeddingsMultiKernelClass(inputEmbeddings)
-
-        # if self.temporalHead:
-        #     inputEmbeddings = self.embeddingsTemporalClass(inputEmbeddings, maskEmbeddings)
-
-        # else:
-        #     inputEmbeddings = torch.cat([
-        #             Helpers.globalMaxPooling(inputEmbeddings, maskEmbeddings),
-        #             Helpers.globalAveragePooling(inputEmbeddings, maskEmbeddings)],
-        #         dim=1
-        #     )
-
-        inputEmbeddings = xEmbeddings.squeeze(-1)
-        self._debugEmbeddings(inputEmbeddings)
-
-        features.append(inputEmbeddings)
+        features.append(inputEmbeddings.squeeze(-1))
 
         if not features:
             raise RuntimeError("Failed to produce any features!")
@@ -1310,6 +1529,8 @@ class SmORFCNN(nn.Module):
 
         if fused.size(1) != self.fusedDim:
             raise ValueError(f"Expected fused dimension {self.fusedDim} , got {fused.size(1)}")
+
+        fused = fused.squeeze(-1)
 
         logits = self.classifier(fused)
 
@@ -1371,17 +1592,19 @@ class SmORFCNN(nn.Module):
 
             loss.backward()
 
-            self._debugStats(
-                probs,
-                loss,
-                maxGradNorm,
-                "Training",
-                i,
-                epochIndex
-            )
+            # self._debugStats(
+            #     probs,
+            #     loss,
+            #     maxGradNorm,
+            #     "Training",
+            #     i,
+            #     epochIndex
+            # )
+
+            torch.nn.utils.clip_grad_norm_(self.parameters(), self.maxGradNorm)
 
             self.optimizer.step()
-
+            self.scheduler.step()
             batchSize = y.size(0)
             n += batchSize
             runningLoss += loss.item() * batchSize
@@ -1429,7 +1652,7 @@ class SmORFCNN(nn.Module):
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
 
-        print(f"Starting training for epoch {epochIndex}")
+        print(f"Starting validation for epoch {epochIndex}")
 
         iterator = tqdm(
                 enumerate(validationData),
@@ -1460,8 +1683,8 @@ class SmORFCNN(nn.Module):
             batchSize = y.size(0)
             n += batchSize
             runningLoss += loss.item() * batchSize
-            probabilities.append(probs.detach())
-            targets.append(y.detach())
+            probabilities.append(probs.detach().cpu())
+            targets.append(y.detach().cpu())
 
             if 'tqdm' in locals():
                 iterator.set_postfix(loss=runningLoss / n)
@@ -1479,6 +1702,12 @@ class SmORFCNN(nn.Module):
             threshold,
             epochIndex
         )
+
+
+        best_t, best_f1 = self._best_threshold_for_f1(probabilities.cpu(), targets.cpu())   # NEW
+        # metrics["best_threshold"] = best_t
+        # metrics["best_f1"] = best_f1
+        print(f"[VAL] best threshold={best_t:.4f}  best F1={best_f1:.4f}") 
 
         metrics = metrics | Helpers.computeEpochROC(
             probabilities,
@@ -1535,8 +1764,8 @@ class SmORFCNN(nn.Module):
             batchSize = y.size(0)
             n += batchSize
             runningLoss += loss.item() * batchSize
-            probabilities.append(probs.detach())
-            targets.append(y.detach()) 
+            probabilities.append(probs.detach().cpu())
+            targets.append(y.detach().cpu()) 
 
             if 'tqdm' in locals():
                 iterator.set_postfix(loss=runningLoss / n)
@@ -1582,6 +1811,8 @@ class SmORFCNN(nn.Module):
         - lr  (the learning rate each epoch, if scheduler/optimizer exposes it)
         """
         self.to(self.device)
+
+        self.scheduler = self._schedulerInit()
 
         bestF1 = -1.0
         bestEpoch = 0
@@ -1637,11 +1868,6 @@ class SmORFCNN(nn.Module):
                 threshold=self.threshold,
             )
 
-            if isinstance(self.scheduler, lrScheduler.ReduceLROnPlateau):
-                self.scheduler.step(epochValMetrics["loss"])
-            else:
-                self.scheduler.step()
-
             for key in epochTrainMetrics:
                 trainingMetrics[key].append(epochTrainMetrics[key])
 
@@ -1650,6 +1876,7 @@ class SmORFCNN(nn.Module):
 
             epochLR = self.optimizer.param_groups[0]["lr"]
             validationMetrics["learningRate"].append(epochLR)
+            print(f"[Scheduler] epoch={epoch} val_loss={epochValMetrics["loss"]:.6f} lr={epochLR:.3e}")
 
             # ---- 5) Save best-by-val-F1 weights ----
             if validationMetrics["f1"][epoch - 1] > bestF1:
@@ -1793,7 +2020,7 @@ class SmORFCNN(nn.Module):
             print(f"[INIT] total params={self.modelParams} trainable={self.modelTrainableParams}")
             print(f"[INIT] optimizer param_groups sizes={[len(g['params']) for g in self.optimizer.param_groups]}")
             print(f"[INIT] device={self.device} multiKernel={self.multiKernel} temporalHead={self.temporalHead}")
-            print(f"[INIT] onehot kernels={self.onehotKernelList} embed kernels={self.embeddingsKernelList}")
+            print(f"[INIT] onehot kernels={self.onehotKernelList}")
             print(f"[INIT] fusedDim={self.fusedDim} classifier={self.classifier}")
     
     def _debugDataLoader(self):
@@ -1842,35 +2069,29 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch-{epochIndex}] outputs shape={tuple(outputs.shape)} "
                 f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
             
-    def _debugStats(self, probs, loss, maxGradNorm, func, index, epochIndex):
+    # def _debugStats(self, probs, loss, maxGradNorm, func, index, epochIndex):
 
-        if index == 0 and epochIndex == 1 and self.debugMode:
+    #     if index == 0 and epochIndex == 1 and self.debugMode:
 
-            total_norm = torch.nn.utils.clip_grad_norm_(self.parameters(), maxGradNorm)
+    #         print(f"[{func} Epoch-{epochIndex}] total_grad_norm(before clip)={total_norm:.4f} "
+    #             f"clipped={bool(total_norm > maxGradNorm)}")
+    #         print(f"[{func} Epoch-{epochIndex}] classifier[0].weight grad |mean|="
+    #             f"{self.classifier[0].weight.grad.abs().mean().item():.6f}")
 
-            print(f"[{func} Epoch-{epochIndex}] total_grad_norm(before clip)={total_norm:.4f} "
-                f"clipped={bool(total_norm > maxGradNorm)}")
-            print(f"[{func} Epoch-{epochIndex}] classifier[0].weight grad |mean|="
-                f"{self.classifier[0].weight.grad.abs().mean().item():.6f}")
+    #         total_norm_sq = 0.0
+    #         for p in self.parameters():
+    #             if p.grad is not None:
+    #                 gn = p.grad.data.norm(2).item()
+    #                 total_norm_sq += gn*gn
 
-            total_norm_sq = 0.0
-            for p in self.parameters():
-                if p.grad is not None:
-                    gn = p.grad.data.norm(2).item()
-                    total_norm_sq += gn*gn
-
-            print(f"[{func} Epoch-{epochIndex}] grad_norm(L2)={total_norm_sq**0.5:.4f} loss={loss.item():.6f} "
-                    f"probs sample={probs.detach().view(-1)[:8].cpu().tolist()}")
+    #         print(f"[{func} Epoch-{epochIndex}] grad_norm(L2)={total_norm_sq**0.5:.4f} loss={loss.item():.6f} "
+    #                 f"probs sample={probs.detach().view(-1)[:8].cpu().tolist()}")
     
     def _debugFinal(self, probabilities, targets, runningLoss, n, func, epochIndex):
         if epochIndex == 0 and self.debugMode:
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,768,"features.pt",debug=True)
+mymodel = SmORFCNN(4,768,"features.pt",debug=False)
 mymodel.initializeDataset()
-mymodel.fit(
-    mymodel.trainDataLoader,
-    mymodel.validationDataLoader,
-    2
-)
+mymodel.fit(mymodel.trainDataLoader, mymodel.validationDataLoader, 10)

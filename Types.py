@@ -37,24 +37,25 @@ DEFAULT_PT_LENGTH_PRINT:                    int         = 10
 ########## ----------- End --------- ##########
 
 ########## ----------- Convolution Block Defaults --------- ##########
-DEFAULT_CONVOLUTION_PADDING                             = None
+DEFAULT_CONVOLUTION_PADDING:                str         = "valid"
 DEFAULT_CONVOLUTION_DILATION:               int         = 1
 DEFAULT_CONVOLUTION_STRIDE:                 int         = 1
 DEFAULT_CONVOLUTION_GROUPS:                 int         = 1
 DEFAULT_CONVOLUTION_ACTIVATION:             str         = "gelu"
 DEFAULT_CONVOLUTION_DROPOUT:                float       = 0.0
+DEFAULT_CONVOLUTION_BIAS:                   bool        = False
 ########## ----------- End --------- ##########
 
 ########## ----------- Multikernel Convolution Defaults --------- ##########
 DEFAULT_MULTI_KERNEL_KERNEL_LIST:           list        = [3,5,7,11,15]
-DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUTCH:   int         = 64
+DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUT:     int         = 64
 ########## ----------- End --------- ##########
 
 ########## ----------- Temporal Head Defaults --------- ##########
-DEFAULT_TEMPORAL_HIDDEN_CHANNELS:            int         = 128
+DEFAULT_TEMPORAL_HIDDEN_CHANNELS:            int         = 512
 DEFAULT_TEMPORAL_KERNEL_REDUCTION:           int         = 1
 DEFAULT_TEMPORAL_KERNEL_RESIDUAL:            int         = 3
-DEFAULT_TEMPORAL_DROPOUT:                    float       = 0.1
+DEFAULT_TEMPORAL_DROPOUT:                    float       = 0.0
 DEFAULT_TEMPORAL_MULTI_DILATION:             bool        = True
 DEFAULT_RESIDUAL_BLOCKS_NMB:                 int         = 2
 ########## ----------- Temporal Head Defaults --------- ##########
@@ -62,21 +63,26 @@ DEFAULT_RESIDUAL_BLOCKS_NMB:                 int         = 2
 ########## ----------- SMORF CNN Classifier Defaults --------- ##########
 DEFAULT_SMORFCNN_TEMPORAL_HEAD:              bool        = True
 DEFAULT_SMORFCNN_MULTI_KERNEL:               bool        = True
-DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST:         list        = [3,5,7,11,15]
-DEFAULT_SMORFCNN_EMBEDDINGS_KERNEL_LIST:     list        = [1]
-DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL:     int         = 64
-DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL:   int         = 128
+DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST:         list        = [3,4,5,6,7,11]
+DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL:     int         = 256
+DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL:   int         = 512
 DEFAULT_SMORFCNN_RESIDUAL_BLOCKS:            int         = 2
-DEFAULT_SMORFCNN_DROPOUT:                    float       = 0.1
+DEFAULT_SMORFCNN_DROPOUT:                    float       = 0.0
 DEFAULT_SMORFCNN_CLASSES:                    int         = 1
-DEFAULT_SMORFCNN_CLASSIFIER_OUTPUT:          int         = 256
+DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT:       int         = 1024
+DEFAULT_SMORFCNN_CLASSIFIER_L1_DROPOUT:      float       = 0.2
+DEFAULT_SMORFCNN_CLASSIFIER_L2_INPUT:        int         = DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT
+DEFAULT_SMORFCNN_CLASSIFIER_L2_OUTPUT:       int         = 256
+DEFAULT_SMORFCNN_CLASSIFIER_L2_DROPOUT:      float       = DEFAULT_SMORFCNN_CLASSIFIER_L1_DROPOUT
 DEFAULT_SMORFCNN_LEARNING_RATE:              float       = 1e-3
-DEFAULT_SMORFCNN_WEIGHT_DECAY:               float       = 1e-2
+DEFAULT_SMORFCNN_WEIGHT_DECAY:               float       = 2e-3
 DEFAULT_SMORFCNN_EPS:                        float       = 1e-8
 DEFAULT_SMORFCNN_BETAS:                      tuple       = (0.9, 0.999)
 DEFAULT_SMORFCNN_FACTOR:                     float       = 0.5
 DEFAULT_SMORFCNN_PATIENCE:                   int         = 2
 DEFAULT_SMORFCNN_MINIMUM_LEARNING_RATE:      float       = 1e-6
+DEFAULT_SMORFCNN_SCHEDULER_FACTOR:           float       = 0.01
+DEFAULT_SMORFCNN_SCHEDULER_WARMUP:           float       = 0.1
 DEFAULT_SMORFCNN_SEED:                       int         = 42
 DEFAULT_SMORFCNN_DETERMINISTIC:              bool        = True 
 DEFAULT_SMORFCNN_DEVICE:                     str         = "cuda" if torch.cuda.is_available() else "cpu"
@@ -87,9 +93,9 @@ DEFAULT_SMORFCNN_THRESHOLD:                  float       = 0.5
 DEFAULT_SMORFCNN_MAX_GRAD_NORM:              float       = 1.0
 DEFAULT_SMORFCNN_LEARNING_RATE:              float       = 1e-3
 DEFAULT_SMORFCNN_WEIGHT_DECAY:               float       = 1e-4
-DEFAULT_SMORFCNN_TRAIN_BATCH_SIZE:           int         = 16
-DEFAULT_SMORFCNN_VALIDATION_BATCH_SIZE:      int         = 16
-DEFAULT_SMORFCNN_TEST_BATCH_SIZE:            int         = 16
+DEFAULT_SMORFCNN_TRAIN_BATCH_SIZE:           int         = 64
+DEFAULT_SMORFCNN_VALIDATION_BATCH_SIZE:      int         = 64
+DEFAULT_SMORFCNN_TEST_BATCH_SIZE:            int         = 64
 DEFAULT_SMORFCNN_EPOCHS:                     int         = 10
 DEFAULT_SMORFCNN_KFOLD:                      int         = 10
 ########## ----------- End --------- ##########
