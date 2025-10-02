@@ -2045,11 +2045,10 @@ class SmORFCNN(nn.Module):
             validationMetrics["learningRate"].append(epochLR)
             print(f"[Scheduler] epoch={epoch} val_loss={epochValMetrics["loss"]:.6f} lr={epochLR:.3e}")
 
-            # ---- 5) Save best-by-val-F1 weights ----
+
             if validationMetrics["f1"][epoch - 1] > bestF1:
                 bestF1 = validationMetrics["f1"][epoch - 1]
                 bestEpoch = epoch
-                # Keep a CPU copy; avoids GPU memory bloat and is device-agnostic to reload
                 bestState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
 
             try:
@@ -2059,7 +2058,6 @@ class SmORFCNN(nn.Module):
             except Exception:
                 pass
 
-        # ---- 7) Restore the best checkpoint (by val F1) ----
         if bestState is not None:
             self.load_state_dict(bestState)
             self.to(self.device)
