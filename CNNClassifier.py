@@ -91,7 +91,6 @@ class ConvolutionBlock(nn.Module):
             bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
-        super().__init__()
         """
         Constructs Conv1d, BatchNormalization, acvtivation function and dropout.
 
@@ -130,6 +129,7 @@ class ConvolutionBlock(nn.Module):
         debug : bool
             Turns debug mode on when true (more information).
         """
+        super().__init__()
 
         self.forwardDebugOnce = debug
         self.debugMode = debug
@@ -155,7 +155,7 @@ class ConvolutionBlock(nn.Module):
             bias=self.bias
         )
 
-        self.register_buffer("maskKernel", torch.ones(1, 1, kernel, dtype=torch.float32))
+        self.register_buffer("mask_kernel", torch.ones(1, 1, kernel, dtype=torch.float32))
 
         self.activation = Types.activationFunctionMapping.get(activation)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
@@ -185,11 +185,12 @@ class ConvolutionBlock(nn.Module):
         if not isinstance(mask, torch.Tensor):
             raise TypeError("Mask argument given is not a Tensor")
 
-        mask = mask.float()
+        mask = mask.unsqueeze(1)
+        mask = mask.to(dtype=torch.float32)
 
         convolution = F.conv1d(
             mask,
-            self.maskKernel,
+            self.mask_kernel,
             stride=self.stride,
             padding=0,
             dilation=self.dilation
@@ -361,7 +362,6 @@ class ResidualBlock(nn.Module):
             bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
-        super().__init__()
         """
         Constructs 2 Convolution Block classes for Residual Mapping and initializes member variables.
 
@@ -400,6 +400,7 @@ class ResidualBlock(nn.Module):
         debug : bool
             Turns debug mode on when true (more information).
         """
+        super().__init__()
 
         self.debugMode = debug
         self.forwardDebugOnce = debug
@@ -605,7 +606,6 @@ class MultiKernelConvolution(nn.Module):
             bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
             debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
-        super().__init__()
         """
         Constructs List of Convolution Blocks to draw features with different kernel sizes and initializes member variables.
 
@@ -644,6 +644,7 @@ class MultiKernelConvolution(nn.Module):
         debug : bool
             Turns debug mode on when true (more information).
         """
+        super().__init__()
 
         self.debugMode = debug
         self.forwardDebugOnce = debug
@@ -940,7 +941,6 @@ class TemporalHead(nn.Module):
         residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB,
         debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
-        super().__init__()
         """
         Constructs a Convolution Block for input reduction, a stack of Residual block of size residualBlocks\n
         and initializes member variables.
@@ -986,6 +986,7 @@ class TemporalHead(nn.Module):
         debug : bool
             Turns debug mode on when true (more information).
         """
+        super().__init__()
 
         self.debugMode = debug
         self.forwardDebugOnce = debug
@@ -1186,22 +1187,149 @@ class TemporalHead(nn.Module):
 
 class SmORFCNN(nn.Module):
     """
-    Two-branch CNN for coding vs non-coding prediction.
+    Multi branch Classifier that takes dnabert 6 embeddings, CLS embeddings and mean embeddings of size [B,1536,1].\n
+    Uses onehot encoded sequences of size [B, 4, 512] that are passed through a Multi Kernel Convolution and then are\n
+    concatenated creating [B, C_out * len(kernelList), L_min]. The features from Multi Kernel are passed to Temporal Head,\n
+    which reduces the feature's size [B, reduces, 498] then passes them through residual mapping 2 residual blocks and computes\n
+    Global Average Pooling and Global Max Pooling [B, C_out * 2].
 
-    Inputs
-    ------
-    x_onehot: [B,4,L]            # optional one-hot DNA
-    x_embed:  [B,E,T]            # optional DNABERT6 embeddings (channels-first)
-    mask_onehot: [B,L] optional  # 1=valid
-    mask_embed:  [B,T] optional  # 1=valid
+    
+    Attributes
+    ----------
+    onehotInputChannels : int
+        Size of onehot encoded sequences.
 
-    Design notes (theory links):
-      - Local convs + weight sharing (translation equivariance)
-      - Multi-scale kernels capture motifs & context
-      - 1x1 conv to squeeze large E (NIN)
-      - Dilations increase receptive field efficiently
-      - Residual skips ease optimization
-      - Global pooling yields fixed-size representation
+    embeddingsInputChannels : int
+        Size of dnabert6 embeddings.
+
+    featuresPath: str
+        Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
+        for valid=1, padded=0 positions and dnabert6 embeddings
+
+    temporalHead : bool
+        Activates Temporal Head Block.
+    
+    multikernel : bool
+        Activates Multi Kernel Block.
+
+    onehotKernelList : list
+        List of different kernel sizes.
+    
+    outputChannelsKernel : int
+        Size of C_out, output channels per kernel convolution block.
+
+    temporalHeadOutputChannels : int
+        Size of C_out, output channels of temporal head block (* 2).
+
+    residualBlocks : int
+        Number of residual blocks used in Temporal head.
+
+    classes : int
+        Number of classes produced at the end of classifier.
+
+    layer1Output : int
+        Output size of layer1 in classifier.
+
+    layer2Output : int
+        Output size of layer2 in classifier.
+
+    classifierDropout : float
+        Dropout between each layer in classifer.
+
+    learningRate : float
+        Initial Learning Rate passed in AdamW optimizer.
+
+    weightDecay : float
+        Weight decay parameter passed in optimizer.
+
+    minLearningRate : float
+        Minimum Learning Rate parameter passed in scheduler.
+
+    schedulerFactor : float
+        Factor parameter passed in scheduler.
+    
+    schedulerWarmup : float
+        Warmup parameter passed in scheduler.
+    
+    threshold : float
+        threshold used to differentiate negative from positive smORFs, from sigmoid probs.
+
+    maxGradNorm : float
+        Maximum grad norm used to clip grad norm.
+
+    seed : int
+        Random see of the model.
+
+    deterministic : bool
+        Enables model to use only deterministic algorithms, helps reproducibillity.
+
+    device : str
+        Device used by model.
+
+    trainBatchSize : int
+        Batch size used for training DataLoader.
+
+    valBatchSize : int
+        Batch size used for validation DataLoader.
+
+    testBatchSize : int
+        Batch size used for testing DataLoader.
+
+    trainSplit : float
+        Split of the total Dataset used for training.
+
+    valSplit : float
+        plit of the total Dataset used for validation.
+
+    testSplit : float
+        plit of the total Dataset used for testing.
+
+    epochs : int
+        Number of epochs for fit.
+    
+    Methods
+    ----------
+    initializeDataset() -> None:
+        Uses Helpers function loadFeaturesFromPt in order to load all tensors from pyTorch file in a TensorDataset.\n
+        Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
+        Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
+    
+    forward(xOnehot: Tensor, xEmbeddings: Tensor, maskOnehot: Tensor) -> Tensor:
+        Takes dnabert6 embeddings and appends them to features list.\n
+        Passes onehot encoded sequences ([B,4,512]) along with their mask through ([B,512,1]) through Multiple Kernel Convolution,\n
+        then through Temporal Head and appends them to the features list as well.\n
+        Finally, creates a features tensor with all features drawn from all branches and passes them to the classifer.\n
+        Logits are returned.
+
+
+    trainEpoch(epochIndex: int) -> dict:
+        Sets the model to training mode with self.train(), initializes loss function BCEWithLogits.\n
+        Iterates the trainingDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
+        Then, computes probabillities and loss, calls back propagation, clips grad norm and uses optimizer and scheduler step.\n
+        Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.).
+
+    validateEpoch(epochIndex: int) -> dict:
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n
+        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
+
+
+    test() -> dict:
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n 
+        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
+
+    fit(epochs: int):
+        Moves model to device, initializes scheduler and keeps dictionaries for training and validation metrics.\n
+        For each epoch trainEpoch and validateEpoch functions are called, their metrics are saved, along with lr and best state.\n
+        Finally after the epochs are finished test function is called to test the model and curves for acc,loss,f1 and auc are printed.
+
+    kFoldCrossValidation()
+
+    print():
+        Prints member variables of the class and number of model parameters and trainable model parameters.
     """
     def __init__(
         self,
@@ -1214,20 +1342,12 @@ class SmORFCNN(nn.Module):
         outputChannelsKernel: int               = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
         temporalHeadOutputChannels: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL,
         residualBlocks: int                     = Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS,
-        dropout: float                          = Types.DEFAULT_SMORFCNN_DROPOUT,
-        bias: bool                              = Types.DEFAULT_CONVOLUTION_BIAS,
         classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
         layer1Output: int                       = Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT,
-        layer1Dropout: float                    = Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_DROPOUT,
-        layer2Input: int                        = Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_INPUT,
         layer2Output: int                       = Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_OUTPUT,
-        layer2Dropout: float                    = Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_DROPOUT,
+        classifierDropout: float                = Types.DEFAULT_SMORFCNN_CLASSIFIER_DROPOUT,
         learningRate: float                     = Types.DEFAULT_SMORFCNN_LEARNING_RATE,
         weightDecay: float                      = Types.DEFAULT_SMORFCNN_WEIGHT_DECAY,
-        eps: float                              = Types.DEFAULT_SMORFCNN_EPS,
-        betas: tuple                            = Types.DEFAULT_SMORFCNN_BETAS,
-        factor: float                           = Types.DEFAULT_SMORFCNN_FACTOR,
-        patience: int                           = Types.DEFAULT_SMORFCNN_PATIENCE,
         minLearningRate: float                  = Types.DEFAULT_SMORFCNN_MINIMUM_LEARNING_RATE,
         schedulerFactor: float                  = Types.DEFAULT_SMORFCNN_SCHEDULER_FACTOR,
         schedulerWarmup: float                  = Types.DEFAULT_SMORFCNN_SCHEDULER_WARMUP,
@@ -1245,6 +1365,103 @@ class SmORFCNN(nn.Module):
         epochs: int                             = Types.DEFAULT_SMORFCNN_EPOCHS,
         debug: bool                             = Types.DEFAULT_DEBUG_MODE
     ):
+        """
+        Constructs the complete smORF Classifier, using multi branched Multiple Kernel Convolution and DNABERT6 embeddings.\n
+        Also, initializes model's parameters and the final 2-layer classifier.
+
+        Parameters
+        ----------
+        onehotInputChannels : int
+            Size of onehot encoded sequences.
+
+        embeddingsInputChannels : int
+            Size of dnabert6 embeddings.
+
+        featuresPath: str
+            Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
+            for valid=1, padded=0 positions and dnabert6 embeddings
+
+        temporalHead : bool
+            Activates Temporal Head Block.
+        
+        multikernel : bool
+            Activates Multi Kernel Block.
+
+        onehotKernelList : list
+            List of different kernel sizes.
+        
+        outputChannelsKernel : int
+            Size of C_out, output channels per kernel convolution block.
+
+        temporalHeadOutputChannels : int
+            Size of C_out, output channels of temporal head block (* 2).
+
+        residualBlocks : int
+            Number of residual blocks used in Temporal head.
+
+        classes : int
+            Number of classes produced at the end of classifier.
+
+        layer1Output : int
+            Output size of layer1 in classifier.
+
+        layer2Output : int
+            Output size of layer2 in classifier.
+
+        classifierDropout : float
+            Dropout between each layer in classifer.
+
+        learningRate : float
+            Initial Learning Rate passed in AdamW optimizer.
+
+        weightDecay : float
+            Weight decay parameter passed in optimizer.
+
+        minLearningRate : float
+            Minimum Learning Rate parameter passed in scheduler.
+
+        schedulerFactor : float
+            Factor parameter passed in scheduler.
+        
+        schedulerWarmup : float
+            Warmup parameter passed in scheduler.
+        
+        threshold : float
+            threshold used to differentiate negative from positive smORFs, from sigmoid probs.
+
+        maxGradNorm : float
+            Maximum grad norm used to clip grad norm.
+
+        seed : int
+            Random see of the model.
+
+        deterministic : bool
+            Enables model to use only deterministic algorithms, helps reproducibillity.
+
+        device : str
+            Device used by model.
+
+        trainBatchSize : int
+            Batch size used for training DataLoader.
+
+        valBatchSize : int
+            Batch size used for validation DataLoader.
+
+        testBatchSize : int
+            Batch size used for testing DataLoader.
+
+        trainSplit : float
+            Split of the total Dataset used for training.
+
+        valSplit : float
+            plit of the total Dataset used for validation.
+
+        testSplit : float
+            plit of the total Dataset used for testing.
+
+        epochs : int
+            Number of epochs for fit.
+        """
         super().__init__()
 
         self.debugMode = debug
@@ -1265,20 +1482,14 @@ class SmORFCNN(nn.Module):
         self.outputChannelsKernel = outputChannelsKernel
         self.temporalHeadOutputChannels = temporalHeadOutputChannels
         self.residualBlocks = residualBlocks
-        self.dropout = dropout
-        self.bias = bias
         self.layer1Output = layer1Output
-        self.layer1Dropout = layer1Dropout
-        self.layer2Input = layer2Input
         self.layer2Output = layer2Output
-        self.layer2Dropout = layer2Dropout
+        self.classifierDropout = classifierDropout
         self.classes = classes
         self.learningRate = learningRate
         self.weightDecay = weightDecay
-        self.eps = eps
-        self.betas = betas
-        self.factor = factor
-        self.patience = patience
+        self.eps = Types.DEFAULT_SMORFCNN_EPS
+        self.betas = Types.DEFAULT_SMORFCNN_BETAS
         self.minLearningRate = minLearningRate
         self.schedulerFactor = schedulerFactor
         self.schedulerWarmpup = schedulerWarmup
@@ -1299,18 +1510,14 @@ class SmORFCNN(nn.Module):
             self.onehotMultiKernelClass = MultiKernelConvolution(
                 inputChannels=self.onehotInputChannels,
                 outputChannelsKernel=self.outputChannelsKernel,
-                kernelList=self.onehotKernelList,
-                dropout=self.dropout,
-                bias=self.bias
+                kernelList=self.onehotKernelList
             )
             
         if self.temporalHead:
             self.onehotTemporalClass = TemporalHead(
                 self.onehotMultiKernelClass.outputChannels,
                 hiddenChannels=self.temporalHeadOutputChannels,
-                residualBlocks=self.residualBlocks,
-                dropout=self.dropout,
-                bias=self.bias
+                residualBlocks=self.residualBlocks
             )
 
         self.fusedDim = self._calculateFusedDim()
@@ -1318,17 +1525,16 @@ class SmORFCNN(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(self.fusedDim, self.layer1Output),
             nn.GELU(),
-            nn.Dropout(self.layer1Output),
+            nn.Dropout(self.classifierDropout),
 
-            nn.Linear(self.layer2Input, self.layer2Output),
+            nn.Linear(self.layer1Output, self.layer2Output),
             nn.GELU(),
-            nn.Dropout(self.layer2Dropout),
+            nn.Dropout(self.classifierDropout),
 
             nn.Linear(self.layer2Output, self.classes)
         )
 
         self.optimizer = self._optimizerInit()
-        #self.scheduler = self._schedulerInit()
 
         self.modelParams = sum(p.numel() for p in self.parameters())
         self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -1363,7 +1569,11 @@ class SmORFCNN(nn.Module):
             torch.backends.cudnn.benchmark = False
 
     def initializeDataset(self) -> None:
-
+        """
+        Uses Helpers function loadFeaturesFromPt in order to load all tensors from pyTorch file in a TensorDataset.\n
+        Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
+        Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
+        """
         tensorDataset = Helpers.loadFeaturesFromPt(self.featuresPath)
 
         self.trainDataLoader, self.validationDataLoader, self.testDataLoader = Helpers.toDataloaders(
@@ -1386,11 +1596,6 @@ class SmORFCNN(nn.Module):
         Helpers.plotLabelDistribution(self.trainDataLoader, self.validationDataLoader, self.testDataLoader)
 
     def _calculateFusedDim(self) -> int:
-        # If TemporalHead is ON, each branch outputs 2*hidden → two branches = 4*hidden.
-        # Do NOT add MultiKernel channels separately when TemporalHead is ON;
-        # they’re already reduced inside the head. (Avoid double counting.)
-        # When TemporalHead is OFF, we pool directly. Each branch contributes 2*C_branch,
-        # where C_branch is MultiKernel out_ch if multiKernel=True, else the raw input channels.
 
         temporalHeadDim = (2 * self.temporalHeadOutputChannels) * int(self.temporalHead)
 
@@ -1408,11 +1613,6 @@ class SmORFCNN(nn.Module):
         return 2560 
 
     def _optimizerInit(self) -> torch.optim.Optimizer:
-        """
-        AdamW with a common param-group trick:
-        - decay on weights of conv/linear
-        - NO decay on biases and norm parameters (1D parameters)
-        """
 
         decay, noDecay = [], []
         for name, param in self.named_parameters():
@@ -1460,45 +1660,42 @@ class SmORFCNN(nn.Module):
         if self.trainDataLoader is None:
             AttributeError("Traindataloader must be initialized to calculate size")
 
-        stepsPerEpoch = len(self.trainingDataloader)
+        stepsPerEpoch = len(self.trainDataLoader)
         totalSteps = stepsPerEpoch * self.epochs
         warmupSteps = int(self.schedulerWarmpup * totalSteps)
         cosineSteps = totalSteps - warmupSteps
 
-        warmup = lrScheduler.LinearLR(
-            self.optimizer, start_factor=self.schedulerFactor, total_iters=warmupSteps
-        )
-        cosine = lrScheduler.CosineAnnealingLR(
-            self.optimizer, T_max=cosineSteps, eta_min=self.minLearningRate
-        )
+        warmup = lrScheduler.LinearLR(self.optimizer, start_factor=self.schedulerFactor, total_iters=warmupSteps)
 
-        return lrScheduler.SequentialLR(
-            self.optimizer,
-            schedulers=[warmup, cosine],
-            milestones=[warmupSteps]
-        )    
+        cosine = lrScheduler.CosineAnnealingLR(self.optimizer, T_max=cosineSteps, eta_min=self.minLearningRate)
 
-    def forward(
-        self,
-        xOnehot: torch.Tensor,
-        xEmbeddings:  torch.Tensor,
-        maskOnehot: torch.Tensor,
-        maskEmbeddings:  torch.Tensor,
-        # rc_augment: bool = False
-    ) -> torch.Tensor:
+        return lrScheduler.SequentialLR(self.optimizer, schedulers=[warmup, cosine], milestones=[warmupSteps])    
+
+    def forward(self, xOnehot: torch.Tensor, xEmbeddings:  torch.Tensor, maskOnehot: torch.Tensor) -> torch.Tensor:
         """
-        forward function that passes onehot encoded sequences/embeddings through
-        MultiKernel CNN and Temporal Head CNN (if branches are active!!).
+        Takes dnabert6 embeddings and appends them to features list.\n
+        Passes onehot encoded sequences ([B,4,512]) along with their mask through ([B,512,1]) through Multiple Kernel Convolution,\n
+        then through Temporal Head and appends them to the features list as well.\n
+        Finally, creates a features tensor with all features drawn from all branches and passes them to the classifer.\n
+        Logits are returned.
 
-        xOnehot --> [B, C1, L] \n
-        xEmbeddings --> [B, C2, T] \n
-        maskOnehot --> [B, L] (1=valid, 0=pad) \n
-        maskEmbeddings --> [B, T] (1=valid, 0=pad) \n
+        Parameters
+        ----------
+        xOnehot : Tensor
+            Onehot encoded sequences of shape [B,4,512].
 
-        Returns:
-        logits: [B] if self.classes==1 else [B, self.classes]
+        xEmbeddings : Tensor
+            DNABERT6 embeddings of shape [B,1536,1].
+
+        maskOnehot : Tensor
+            Mask used to differentiate valid from padded positions, shape [B,512,1].
+
+        Return
+        ----------
+        Tensor
+            Logits Tensor after the classifier's output.
         """
-        self._debugIn(xOnehot, xEmbeddings, maskOnehot, maskEmbeddings)
+        self._debugIn(xOnehot, xEmbeddings, maskOnehot)
 
         features = []
         inputOneHot = xOnehot
@@ -1538,16 +1735,22 @@ class SmORFCNN(nn.Module):
 
         return logits.squeeze(-1) if self.classes == 1 else logits
 
-    def trainEpoch(
-            self,
-            trainingData: DataLoader,
-            epochIndex: int,
-            maxGradNorm: float      = Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
-            threshold: float        = Types.DEFAULT_SMORFCNN_THRESHOLD
-        ) -> dict:
-        
+    def trainEpoch(self, epochIndex: int) -> dict:
         """
-        Trainer function
+        Sets the model to training mode with self.train(), initializes loss function BCEWithLogits.\n
+        Iterates the trainingDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
+        Then, computes probabillities and loss, calls back propagation, clips grad norm and uses optimizer and scheduler step.\n
+        Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.).
+
+        Parameters
+        ----------
+        epochIndex : int
+            Current epoch number.
+
+        Return
+        ----------
+        dict
+            Dictionary of all epoch metrics during triaing ("acc", "loss", precision, etc.).
         """
         self.train()
 
@@ -1562,13 +1765,13 @@ class SmORFCNN(nn.Module):
 
         try:
             iterator = tqdm(
-                    enumerate(trainingData),
-                    total=len(trainingData),
+                    enumerate(self.trainDataLoader),
+                    total=len(self.trainDataLoader),
                     desc=f"Epoch {epochIndex}",
                     leave=False
                 )
         except Exception:
-            iterator = enumerate(trainingData)
+            iterator = enumerate(self.trainDataLoader)
 
         for i, batch in iterator:
             xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
@@ -1583,7 +1786,7 @@ class SmORFCNN(nn.Module):
 
             self.optimizer.zero_grad()
 
-            outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
+            outputs = self(xOnehot, xEmbed, maskOnehot)
 
             self._debugOutEpoch(outputs, "Training", i, epochIndex)
 
@@ -1617,32 +1820,28 @@ class SmORFCNN(nn.Module):
         probabilities = torch.cat(probabilities, dim=0)
         targets = torch.cat(targets, dim=0)
 
-        self._debugFinal(
-            probabilities,
-            targets,
-            runningLoss,
-            n,
-            "Training",
-            epochIndex
-        )
+        self._debugFinal(probabilities, targets, runningLoss, n, "Training", epochIndex)
 
-        return Helpers.computeEpochMetrics(
-            probabilities,
-            targets,
-            runningLoss,
-            n,
-            threshold,
-            epochIndex
-        )
+        return Helpers.computeEpochMetrics(probabilities, targets, runningLoss, n, self.threshold, epochIndex)
 
     @torch.no_grad()
-    def validateEpoch(
-            self,
-            validationData: DataLoader,
-            epochIndex: int,
-            threshold: float = Types.DEFAULT_SMORFCNN_THRESHOLD,
-        ) -> dict:
+    def validateEpoch(self, epochIndex: int) -> dict:
+        """
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n
+        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.).
 
+        Parameters
+        ----------
+        epochIndex : int
+            Current epoch number.
+
+        Return
+        ----------
+        dict
+            Dictionary of all epoch metrics during validation ("acc", "loss", precision, etc.), along with ROC AUC.
+        """
         self.eval()
 
         n = 0
@@ -1655,8 +1854,8 @@ class SmORFCNN(nn.Module):
         print(f"Starting validation for epoch {epochIndex}")
 
         iterator = tqdm(
-                enumerate(validationData),
-                total=len(validationData),
+                enumerate(self.validationDataLoader),
+                total=len(self.validationDataLoader),
                 desc=f"Epoch {epochIndex}",
                 leave=False
             )
@@ -1673,7 +1872,7 @@ class SmORFCNN(nn.Module):
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
 
-            outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
+            outputs = self(xOnehot, xEmbed, maskOnehot)
 
             self._debugOutEpoch(outputs, "Validation", j, epochIndex)
 
@@ -1694,14 +1893,7 @@ class SmORFCNN(nn.Module):
 
         self._debugFinal(probabilities, targets, runningLoss, n, "Validation", epochIndex)
 
-        metrics = Helpers.computeEpochMetrics(
-            probabilities,
-            targets,
-            runningLoss,
-            n,
-            threshold,
-            epochIndex
-        )
+        metrics = Helpers.computeEpochMetrics(probabilities, targets, runningLoss, n, self.threshold, epochIndex)
 
 
         best_t, best_f1 = self._best_threshold_for_f1(probabilities.cpu(), targets.cpu())   # NEW
@@ -1709,21 +1901,23 @@ class SmORFCNN(nn.Module):
         # metrics["best_f1"] = best_f1
         print(f"[VAL] best threshold={best_t:.4f}  best F1={best_f1:.4f}") 
 
-        metrics = metrics | Helpers.computeEpochROC(
-            probabilities,
-            targets,
-            epochIndex
-        )
+        metrics = metrics | Helpers.computeEpochROC(probabilities, targets, epochIndex)
 
         return metrics
 
     @torch.no_grad()
-    def test(
-            self,
-            testData: DataLoader,
-            threshold: float = Types.DEFAULT_SMORFCNN_THRESHOLD,
-        ) -> dict:
+    def test(self) -> dict:
+        """
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n 
+        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
 
+        Return
+        ----------
+        dict
+            Dictionary of all epoch metrics during validation ("acc", "loss", precision, etc.), along with ROC AUC.
+        """
         self.eval()
 
         n = 0
@@ -1736,9 +1930,9 @@ class SmORFCNN(nn.Module):
         print(f"Starting testing")
 
         iterator = tqdm(
-                enumerate(testData),
-                total=len(testData),
-                desc=f"{testData}",
+                enumerate(self.testDataLoader),
+                total=len(self.testDataLoader),
+                desc=f"{self.testDataLoader}",
                 leave=False
             )
 
@@ -1754,7 +1948,7 @@ class SmORFCNN(nn.Module):
             maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
 
-            outputs = self(xOnehot, xEmbed, maskOnehot, maskEmbed)
+            outputs = self(xOnehot, xEmbed, maskOnehot)
 
             self._debugOutEpoch(outputs, "Testing", k, 1)
 
@@ -1775,40 +1969,22 @@ class SmORFCNN(nn.Module):
 
         self._debugFinal(probabilities, targets, runningLoss, n, "Testing", 1)
 
-        metrics = Helpers.computeEpochMetrics(
-            probabilities,
-            targets,
-            runningLoss,
-            n,
-            threshold,
-            0
-        )
+        metrics = Helpers.computeEpochMetrics(probabilities, targets, runningLoss, n, self.threshold, 0)
 
-        metrics = metrics | Helpers.computeEpochROC(
-            probabilities,
-            targets,
-            0
-        )
+        metrics = metrics | Helpers.computeEpochROC(probabilities, targets, 0)
 
         return metrics
 
-    def fit(
-        self,
-        trainingDataloader:     DataLoader,
-        validationDataloader:   DataLoader,
-        epochs:                 int,
-    ):
+    def fit(self, epochs: int):
         """
-        Train the model for `epochs` using train/val loaders and return a training history dict.
-        Keeps the best (val F1) checkpoint loaded at the end.
-        History keys:
-        - train_loss, val_loss
-        - train_acc,  val_acc
-        - train_precision, val_precision
-        - train_recall,    val_recall
-        - train_f1,        val_f1
-        - val_roc_auc
-        - lr  (the learning rate each epoch, if scheduler/optimizer exposes it)
+        Moves model to device, initializes scheduler and keeps dictionaries for training and validation metrics.\n
+        For each epoch trainEpoch and validateEpoch functions are called, their metrics are saved, along with lr and best state.\n
+        Finally after the epochs are finished test function is called to test the model and curves for acc,loss,f1 and auc are printed.
+
+        Parameters
+        ----------
+        epochIndex : int
+            Current epoch number.
         """
         self.to(self.device)
 
@@ -1855,18 +2031,9 @@ class SmORFCNN(nn.Module):
 
         for epoch,_ in epochIter:
 
-            epochTrainMetrics = self.trainEpoch(
-                trainingData=trainingDataloader,
-                epochIndex=epoch,
-                maxGradNorm=Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
-                threshold=self.threshold,
-            )
+            epochTrainMetrics = self.trainEpoch(epochIndex=epoch)
 
-            epochValMetrics = self.validateEpoch(
-                validationData=validationDataloader,
-                epochIndex=epoch,
-                threshold=self.threshold,
-            )
+            epochValMetrics = self.validateEpoch(epochIndex=epoch)
 
             for key in epochTrainMetrics:
                 trainingMetrics[key].append(epochTrainMetrics[key])
@@ -1897,7 +2064,7 @@ class SmORFCNN(nn.Module):
             self.load_state_dict(bestState)
             self.to(self.device)
         
-        testMetrics = self.test(self.testDataLoader)
+        testMetrics = self.test()
 
         Helpers.printFitSummary(trainingMetrics, validationMetrics)
 
@@ -1909,10 +2076,7 @@ class SmORFCNN(nn.Module):
 
         return trainingMetrics, validationMetrics
 
-    def kFoldCrossValidation(
-        self,
-        k: int = Types.DEFAULT_SMORFCNN_KFOLD,
-    ):
+    def kFoldCrossValidation(self, k: int = Types.DEFAULT_SMORFCNN_KFOLD):
         """
         """
         fullDataset = ConcatDataset([self.trainDataLoader.dataset, self.validationDataLoader.dataset])
@@ -2032,14 +2196,13 @@ class SmORFCNN(nn.Module):
             print(f"[SPLIT] |train|={len(tIdx)} |val|={len(vIdx)} |test|={len(teIdx)} "
                 f"overlap train∩val={len(tIdx & vIdx)} train∩test={len(tIdx & teIdx)} val∩test={len(vIdx & teIdx)}")
 
-    def _debugIn(self, xOnehot, xEmbeddings, maskOnehot, maskEmbeddings):
+    def _debugIn(self, xOnehot, xEmbeddings, maskOnehot):
         if self.forwardDebugOnce and self.debugMode:
             print(f"[SmORFCNN.forward] xOnehot shape={tuple(xOnehot.shape)} "
                     f"min/max/mean=({xOnehot.detach().min().item():.3f}/{xOnehot.detach().max().item():.3f}/{xOnehot.detach().float().mean().item():.3f})")
             print(f"[SmORFCNN.forward] xEmbeddings shape={tuple(xEmbeddings.shape)} "
                     f"min/max/mean=({xEmbeddings.detach().min().item():.3f}/{xEmbeddings.detach().max().item():.3f}/{xEmbeddings.detach().float().mean().item():.3f})")
             print(f"[SmORFCNN.forward] maskOnehot shape={tuple(maskOnehot.shape)} sum per-batch={maskOnehot.sum(dim=1).detach().cpu().tolist()[:8]}")
-            print(f"[SmORFCNN.forward] maskEmbeddings shape={tuple(maskEmbeddings.shape)} sum per-batch={maskEmbeddings.sum(dim=1).detach().cpu().tolist()[:8]}")
 
     def _debugOnehot(self, inputOneHot):
         if self.forwardDebugOnce and self.debugMode:
@@ -2094,4 +2257,4 @@ class SmORFCNN(nn.Module):
 
 mymodel = SmORFCNN(4,768,"features.pt",debug=False)
 mymodel.initializeDataset()
-mymodel.fit(mymodel.trainDataLoader, mymodel.validationDataLoader, 10)
+mymodel.fit(10)
