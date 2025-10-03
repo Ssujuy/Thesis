@@ -783,78 +783,78 @@ class MultiKernelConvolution(nn.Module):
             print(f"[MultiKernelConv] concat out shape={tuple(out.shape)}")
             self.forwardDebugOnce = False
 
-# class MultiGapKernelConvolution(nn.Module):
-#     """
-#     """
-#     def __init__(
-#         self,
-#         inputChannels,
-#         outputChannelsBranch:int,
-#         kernelList: list          = Types.DEFAULT_TEMPORAL_KERNEL_RESIDUAL,
-#         gapList: list        = Types.DEFAULT_TEMPORAL_KERNEL_REDUCTION,
-#         stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
-#         padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
-#         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
-#         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
-#         dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
-#         debug: bool                 = Types.DEFAULT_DEBUG_MODE
-#         ):
-#         super().__init__()
+class MultiGapKernelConvolution(nn.Module):
+    """
+    """
+    def __init__(
+        self,
+        inputChannels,
+        outputChannelsBranch:int,
+        kernelList: list            = [3,4,5,6,7,11],
+        gapList: list               = [1,2,3],
+        stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
+        padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
+        groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
+        activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
+        dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
+        debug: bool                 = Types.DEFAULT_DEBUG_MODE
+        ):
+        super().__init__()
 
-#         self.inputChannels = inputChannels
-#         self.outputChannelsBranch = outputChannelsBranch
-#         self.kernelList = kernelList
-#         self.gapList = gapList
-#         self.stride = stride
-#         self.padding = padding
-#         self.groups = groups
-#         self.activation = activation
-#         self.dropout = dropout
-#         self.debugMode = debug
+        self.inputChannels = inputChannels
+        self.outputChannelsBranch = outputChannelsBranch
+        self.kernelList = kernelList
+        self.gapList = gapList
+        self.stride = stride
+        self.padding = padding
+        self.groups = groups
+        self.activation = activation
+        self.dropout = dropout
+        self.debugMode = debug
 
-#         self.branches = nn.ModuleList()
-#         self.pairs = []
+        self.branches = nn.ModuleList()
+        self.pairs = []
 
-#         for k in kernelList:
-#             for g in gapList:
-#                 dil = g + 1
-#                 self.branches.append(
-#                     ConvolutionBlock(
-#                         inputChannels=self.inputChannels,
-#                         outputChannels=self.outputChannelsBranch,
-#                         kernel=k,
-#                         stride=self.stride,
-#                         padding=self.padding,
-#                         dilation=dil,
-#                         groups=self.groups,
-#                         activation=self.activation,
-#                         dropout=self.dropout,
-#                         debug=self.debugMode,
-#                     )
-#                 )
-#                 self.pairs.append((k, g))
+        for k in kernelList:
+            for g in gapList:
+                dil = g + 1
+                self.branches.append(
+                    ConvolutionBlock(
+                        inputChannels=self.inputChannels,
+                        outputChannels=self.outputChannelsBranch,
+                        kernel=k,
+                        stride=self.stride,
+                        padding=self.padding,
+                        dilation=dil,
+                        groups=self.groups,
+                        activation=self.activation,
+                        dropout=self.dropout,
+                        debug=self.debugMode,
+                    )
+                )
+                self.pairs.append((k, g))
 
-#         self.outputChannels = self.outputChannelsBranch * len(self.branches)
+        self.outputChannels = self.outputChannelsBranch * len(self.branches)
 
-#     def forward(self, x: torch.Tensor, mask: torch.Tensor):
-#         # Collect per-branch outputs and masks
-#         ys, ms = [], []
-#         for block in self.branches:
-#             y, m = block(x, mask)    # y:[B,C,L_k,g], m:[B,L_k,g]
-#             ys.append(y); ms.append(m)
+    def forward(self, x: torch.Tensor, mask: torch.Tensor):
+        # Collect per-branch outputs and masks
+        ys, ms = [], []
+        for block in self.branches:
+            y, m = block(x, mask)    # y:[B,C,L_k,g], m:[B,L_k,g]
+            ys.append(y); ms.append(m)
 
-#         # Align lengths: crop all to the minimum L
-#         Lmin = min(y.size(-1) for y in ys)
-#         ys = [y[..., :Lmin] for y in ys]
-#         ms = [m[..., :Lmin] for m in ms]
+        # Align lengths: crop all to the minimum L
+        Lmin = min(y.size(-1) for y in ys)
+        ys = [y[..., :Lmin] for y in ys]
+        ms = [m[..., :Lmin] for m in ms]
 
-#         # Concatenate channels and AND the masks across branches
-#         y_cat = torch.cat(ys, dim=1)    # [B, C_total, Lmin]
-#         m_cat = ms[0]
-#         for m in ms[1:]:
-#             m_cat = (m_cat & m)
+        # Concatenate channels and AND the masks across branches
+        y_cat = torch.cat(ys, dim=1)    # [B, C_total, Lmin]
+        m_cat = ms[0]
+        for m in ms[1:]:
+            m_cat = (m_cat & m)
 
-#         return y_cat, m_cat
+        return y_cat, m_cat
 
 class TemporalHead(nn.Module):
     """
@@ -1336,8 +1336,9 @@ class SmORFCNN(nn.Module):
         onehotInputChannels: int,
         embeddingsInputChannels: int,
         featuresPath: str,
-        temporalHead: bool                      = Types.DEFAULT_SMORFCNN_TEMPORAL_HEAD,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
+        multiGapKernel: bool                    = True,
+        dnabertEmbeddings: bool                 = True,
         onehotKernelList: list                  = Types.DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST,
         outputChannelsKernel: int               = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
         temporalHeadOutputChannels: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL,
@@ -1476,8 +1477,9 @@ class SmORFCNN(nn.Module):
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
 
-        self.temporalHead = temporalHead
         self.multiKernel = multiKernel
+        self.multiGapKernel = multiGapKernel
+        self.dnabertEmbeddings = dnabertEmbeddings
         self.onehotKernelList = onehotKernelList
         self.outputChannelsKernel = outputChannelsKernel
         self.temporalHeadOutputChannels = temporalHeadOutputChannels
@@ -1503,27 +1505,40 @@ class SmORFCNN(nn.Module):
         self.testSplit = testSplit
         self.epochs = epochs
 
-        self.onehotMultiKernelClass = None
-        self.onehotTemporalClass = None
+        self.multiKernelClass = None
+        self.multiKernelTemporalClass = None
+        self.multiGapKernelClass = None
+        self.multiGapKernelTemporalClass = None
 
         if self.multiKernel:
-            self.onehotMultiKernelClass = MultiKernelConvolution(
+            self.multiKernelClass = MultiKernelConvolution(
                 inputChannels=self.onehotInputChannels,
                 outputChannelsKernel=self.outputChannelsKernel,
                 kernelList=self.onehotKernelList
             )
-            
-        if self.temporalHead:
-            self.onehotTemporalClass = TemporalHead(
-                self.onehotMultiKernelClass.outputChannels,
+
+            self.multiKernelTemporalClass = TemporalHead(
+                self.multiKernelClass.outputChannels,
                 hiddenChannels=self.temporalHeadOutputChannels,
                 residualBlocks=self.residualBlocks
             )
 
-        self.fusedDim = self._calculateFusedDim()
+        if self.multiGapKernel:
+            self.multiGapKernelClass = MultiGapKernelConvolution(
+                inputChannels=self.onehotInputChannels,
+                outputChannelsBranch=256
+            )
+
+            self.multiGapKernelTemporalClass = TemporalHead(
+                self.multiGapKernelClass.outputChannels,
+                hiddenChannels=self.temporalHeadOutputChannels,
+                residualBlocks=self.residualBlocks
+            )
+
+        self.featuresDim = self._calculateFeaturesDim()
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.fusedDim, self.layer1Output),
+            nn.Linear(self.featuresDim, self.layer1Output),
             nn.GELU(),
             nn.Dropout(self.classifierDropout),
 
@@ -1548,7 +1563,10 @@ class SmORFCNN(nn.Module):
         self.to(self.device)
 
     def _initializeEnvironment(self):
-
+        """
+        Sets environment config for deterministic algorithm (helps with reproducibillity),\n
+        Sets seed and random seed with model's seed.
+        """
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
         os.environ["PYTHONHASHSEED"] = str(self.seed)
@@ -1595,25 +1613,38 @@ class SmORFCNN(nn.Module):
 
         Helpers.plotLabelDistribution(self.trainDataLoader, self.validationDataLoader, self.testDataLoader)
 
-    def _calculateFusedDim(self) -> int:
+    def _calculateFeaturesDim(self) -> int:
+        """
+        Calculates total features dim, which is the classifier's input channel, based on active branches.
+        
+        Return
+        ----------
+        int
+            Calculated features dimension.
+        """
+        fusedDim = 0
 
-        temporalHeadDim = (2 * self.temporalHeadOutputChannels) * int(self.temporalHead)
+        if self.dnabertEmbeddings:
+            fusedDim += self.embeddingsInputChannels
+        
+        if self.multiKernel:
+            fusedDim += 2 * self.temporalHeadOutputChannels
+        
+        if self.multiGapKernel:
+            fusedDim += 2 * self.temporalHeadOutputChannels
 
-        if self.temporalHead:
-            poolingNoTemporalDim = 0
-        else:
-            onehotChannels = (self.onehotMultiKernelClass.outputChannels
-                            if self.multiKernel else self.onehotInputChannels)
-            embedChannels  = (self.embeddingsMultiKernelClass.outputChannels
-                            if self.multiKernel else self.embeddingsInputChannels)
-            poolingNoTemporalDim = 2 * (onehotChannels + embedChannels)
-
-        multiKernelDim = 0
-
-        return 2560 
+        return fusedDim
 
     def _optimizerInit(self) -> torch.optim.Optimizer:
+        """
+        Initializes AdamW optimizer, adds weight decay to weight kernels\n
+        and removes it from norms and biases
 
+        Return
+        ----------
+        torch.optim.Optimizer
+            AdamW optimizer.
+        """
         decay, noDecay = [], []
         for name, param in self.named_parameters():
             if not param.requires_grad:
@@ -1656,7 +1687,9 @@ class SmORFCNN(nn.Module):
 
 
     def _schedulerInit(self) -> torch.optim.lr_scheduler:
-
+        """
+        Initializer sequential Learning rate schedulers, with warmpup LinearLR and cosine CosineAnnealingLR.
+        """
         if self.trainDataLoader is None:
             AttributeError("Traindataloader must be initialized to calculate size")
 
@@ -1698,7 +1731,8 @@ class SmORFCNN(nn.Module):
         self._debugIn(xOnehot, xEmbeddings, maskOnehot)
 
         features = []
-        inputOneHot = xOnehot
+        inputMKCOneHot = xOnehot
+        inputMGKCOneHot = xOnehot
         inputEmbeddings = xEmbeddings
 
         if xOnehot is None:
@@ -1708,24 +1742,28 @@ class SmORFCNN(nn.Module):
             raise AttributeError("Did not receive dnabert6 embeddings input!")
 
         if self.multiKernel:
-            inputOneHot, maskMKC = self.onehotMultiKernelClass(inputOneHot, maskOnehot)
 
-        if self.temporalHead:
-            inputOneHot = self.onehotTemporalClass(inputOneHot, maskMKC)
-        
-        self._debugOnehot(inputOneHot)
+            inputMKCOneHot, maskMKC = self.multiKernelClass(inputMKCOneHot, maskOnehot)
+            inputMKCOneHot = self.multiKernelTemporalClass(inputMKCOneHot, maskMKC)
+            features.append(inputMKCOneHot)
 
-        features.append(inputOneHot)
+        if self.multiGapKernel:
 
-        features.append(inputEmbeddings.squeeze(-1))
+            inputMGKCOneHot, maskMGKC = self.multiGapKernelClass(inputMGKCOneHot, maskOnehot)
+            inputMGKCOneHot = self.multiGapKernelTemporalClass(inputMGKCOneHot, maskMGKC)
+            features.append(inputMGKCOneHot)
+
+        if self.dnabertEmbeddings:
+
+            features.append(inputEmbeddings.squeeze(-1))
 
         if not features:
             raise RuntimeError("Failed to produce any features!")
 
         fused = features[0] if len(features) == 1 else torch.cat(features, dim=1)
 
-        if fused.size(1) != self.fusedDim:
-            raise ValueError(f"Expected fused dimension {self.fusedDim} , got {fused.size(1)}")
+        if fused.size(1) != self.featuresDim:
+            raise ValueError(f"Expected fused dimension {self.featuresDim} , got {fused.size(1)}")
 
         fused = fused.squeeze(-1)
 
@@ -2183,7 +2221,7 @@ class SmORFCNN(nn.Module):
             print(f"[INIT] optimizer param_groups sizes={[len(g['params']) for g in self.optimizer.param_groups]}")
             print(f"[INIT] device={self.device} multiKernel={self.multiKernel} temporalHead={self.temporalHead}")
             print(f"[INIT] onehot kernels={self.onehotKernelList}")
-            print(f"[INIT] fusedDim={self.fusedDim} classifier={self.classifier}")
+            print(f"[INIT] fusedDim={self.featuresDim} classifier={self.classifier}")
     
     def _debugDataLoader(self):
 
@@ -2229,30 +2267,12 @@ class SmORFCNN(nn.Module):
         if index == 0 and epochIndex == 1 and self.debugMode:
             print(f"[{func} Epoch-{epochIndex}] outputs shape={tuple(outputs.shape)} "
                 f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
-            
-    # def _debugStats(self, probs, loss, maxGradNorm, func, index, epochIndex):
-
-    #     if index == 0 and epochIndex == 1 and self.debugMode:
-
-    #         print(f"[{func} Epoch-{epochIndex}] total_grad_norm(before clip)={total_norm:.4f} "
-    #             f"clipped={bool(total_norm > maxGradNorm)}")
-    #         print(f"[{func} Epoch-{epochIndex}] classifier[0].weight grad |mean|="
-    #             f"{self.classifier[0].weight.grad.abs().mean().item():.6f}")
-
-    #         total_norm_sq = 0.0
-    #         for p in self.parameters():
-    #             if p.grad is not None:
-    #                 gn = p.grad.data.norm(2).item()
-    #                 total_norm_sq += gn*gn
-
-    #         print(f"[{func} Epoch-{epochIndex}] grad_norm(L2)={total_norm_sq**0.5:.4f} loss={loss.item():.6f} "
-    #                 f"probs sample={probs.detach().view(-1)[:8].cpu().tolist()}")
     
     def _debugFinal(self, probabilities, targets, runningLoss, n, func, epochIndex):
         if epochIndex == 0 and self.debugMode:
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,768,"features.pt",debug=False)
+mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
 mymodel.initializeDataset()
 mymodel.fit(10)
