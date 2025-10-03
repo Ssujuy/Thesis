@@ -78,6 +78,6 @@ class MultiGapKernelConvolution(nn.Module):
         outputs = torch.cat(outputs, dim=1)
         masksOut = masks[0]
         for m in masks[1:]:
-            masksOut = (masks & m)
+            masksOut = (masksOut & m)
 
         return outputs, masksOut
