@@ -21,7 +21,7 @@ class MultiKernelConvolution(nn.Module):
         Turns debug mode on when true (more information).
 
     inputChannels: int
-        Size of input
+        Size of input.
 
     outputChannelsKernel: int
         Size of output channels per kernel.
@@ -166,7 +166,7 @@ class MultiKernelConvolution(nn.Module):
         Compute convolution with different kernel widths. Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).\n
         Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.\n
         Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.\n
-        Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min)
+        Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min).
 
         Parameters
         ----------
