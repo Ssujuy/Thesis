@@ -137,7 +137,6 @@ def loadFeaturesFromPt(path: str) -> TensorDataset:
 
     # --- embeddings: numpy [N,D] -> tensor [N,D,1], mask = ones ---
     xEmbed = torch.as_tensor(features["embeddings"], dtype=torch.float32).unsqueeze(-1)
-    maskEmbed = torch.ones((xEmbed.size(0), 1), dtype=torch.float32)  # [N,1]
 
 
     if features["labels"] != None:
@@ -146,7 +145,7 @@ def loadFeaturesFromPt(path: str) -> TensorDataset:
     else:
         raise ValueError(f"Pytorch file {path} does not contain key 'labels'")
 
-    return TensorDataset(xOnehot, maskOnehot, xEmbed, maskEmbed, y)
+    return TensorDataset(xOnehot, maskOnehot, xEmbed, y)
 
 def toDataloaders(
         dataset: TensorDataset,
@@ -245,7 +244,7 @@ def printDataloader(name: str, data: DataLoader) -> None:
 
     samples = len(data.dataset)
 
-    xOnehot, maskOnehot, xEmbed, maskEmbed, y = next(iter(data))
+    xOnehot, maskOnehot, xEmbed, y = next(iter(data))
 
     print(f"Print 3 rows for {name} DataLoader")
     print(f"  - Number of batches: {batches}")
@@ -253,12 +252,11 @@ def printDataloader(name: str, data: DataLoader) -> None:
     print(f"  - One Hot Encoded sequences shape: {xOnehot.shape}")
     print(f"  - Mask for One Hot Encoded sequences shape: {maskOnehot.shape}")
     print(f"  - Embeddings shape: {xEmbed.shape}")
-    print(f"  - Mask for Embeddings shape: {maskEmbed.shape}")
     print(f"  - Labels shape: {y.shape}")
 
     try:
         batch = next(iter(data))
-        xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+        xOnehot, maskOnehot, xEmbed, y = batch
 
         table = []
 
@@ -269,7 +267,6 @@ def printDataloader(name: str, data: DataLoader) -> None:
                 "onehot": xOnehot[i],
                 "maskOnehot": maskOnehot[i],
                 "embeddings": xEmbed[i],
-                "maskEmbedings": maskEmbed[i],
                 "labels": y[i]
             })
 
@@ -314,7 +311,35 @@ def loadDatasetPercentage(datasetPath: str, percentage: int)-> DatasetDict:
 
 ########## ----------- Sequence Helper Functions --------- ##########
 
-def kmer(sequence: str, k: int, ambiguousState: Types.KmerAmbiguousState):
+def kmer(sequence: str, k: int):
+
+    """
+    Function that splits a DNA sequence into k-mer parts.
+
+    Parameters
+    ----------
+    sequence : str
+        DNA sequence as a string.
+
+    k : int
+        Size of each k-mer.
+
+    Returns
+    ----------
+    list
+        string items of size k.
+    """
+
+    kmerSequence = []
+
+    for i in range(len(sequence) - k + 1):
+        
+        kmer = sequence[i:i+k]
+        kmerSequence.append(kmer)
+
+    return kmerSequence
+
+def kmerDnabert(sequence: str, k: int, ambiguousState: Types.KmerAmbiguousState):
 
     """
     Function that splits a DNA sequence into k-mer parts.

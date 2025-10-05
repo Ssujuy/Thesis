@@ -1,42 +1,80 @@
-START_CODON = "ATG"
-STOP_CODON = {"TAA", "TAG", "TGA"}
+import itertools
+import pandas as pd
+import math
 
-def hexamerScore():
+import Helpers
 
-    return None
+class HexamerScore():
+    def __init__(self, sequencesPath: str):
+        self.k = 6
+        self.bases = ['A', 'C', 'G', 'T']
 
-def firstORFLength(sequence: str) -> int:
+        hexamers = [''.join(kmer) for kmer in itertools.product(self.bases, repeat=self.k)]
 
-    startCodon = sequence.find(START_CODON)
+        self.codingHexamersFreq = {h:0 for h in hexamers}
+        self.nonCodingHemaerFreq = {h:0 for h in hexamers}
 
-    if startCodon == -1:
-        return 0
+        df = pd.read_csv(sequencesPath)
+
+        for sequence, label in zip(df["sequence"], df["label"]):
+            if 'N' not in sequence:
+                if label == 1:
+                    kmerSequence = Helpers.kmer(sequence, self.k)
+                    for kmer in kmerSequence:
+                        self.codingHexamersFreq[kmer] += 1
+                else:
+                    kmerSequence = Helpers.kmer(sequence, self.k)
+                    for kmer in kmerSequence:
+                        self.nonCodingHemaerFreq[kmer] += 1
+
+        totalCoding = sum(self.codingHexamersFreq.values()) + 4**self.k * 1.0
+        totalNonCoding = sum(self.nonCodingHemaerFreq.values()) + 4**self.k * 1.0
+
+        for key, value in self.codingHexamersFreq.items():
+            self.codingHexamersFreq[key] = (value + 1.0) / totalCoding
+
+        for key, value in self.nonCodingHemaerFreq.items():
+            self.nonCodingHemaerFreq[key] = (value + 1.0) / totalNonCoding
+
+    def score(self, sequence: str) -> float:
+        total = 0.0
+        p = 0.0
+        kmerSequence = Helpers.kmer(sequence, self.k)
+
+        for kmer in  kmerSequence:
+            p += math.log(self.codingHexamersFreq[kmer] / self.nonCodingHemaerFreq[kmer])
+            total += 1
+
+        return p / total
     
-    else:
-        for i in range(startCodon, len(sequence), 3):
-            codon = sequence[i:i+3]
-            if codon in STOP_CODON:
-                return i + 3 - startCodon
-        return len(sequence) - startCodon
+class FicketScore():
+
+    def __init__(self, sequencePath: str):
+
+def ficketScore(sequence: str):
+
+    frame1 = sequence[0::3]
+    frame2 = sequence[1::3]
+    frame3 = sequence[2::3]
+
+    length = len(sequence)
+
+    frequencies = {b: sequence.count(b) / length for b in "ATCG"}
+
+    fpos = {b: [frame1.count(b)/len(frame1),
+            frame2.count(b)/len(frame2),
+            frame3.count(b)/len(frame3)] for b in "ATCG"}
     
-def maxORFLength(sequence: str) -> int:
+    bias = {b: max(fpos[b]) / (min(fpos[b]) + 1e-9) for b in "ATCG"}
 
-    maxLength = 0
+    fickett = sum((frequencies[b] + bias[b]) / 2 for b in "ATCG") / 4
 
-    for i in range(0, len(sequence) - 2, 3):
-        codon = sequence[i:i+3]
+    return fickett
 
-        if codon == START_CODON:
-            for j in range(i+3, len(sequence) - 2, 3):
-                codon2 = sequence[j:j+3]
+seq1 = "ATGCGTACGTTGCGACCTAGTGACGTGACCATGCGTATCGTGACGATCGTACGTAGCTAGCTG"
+seq2 = "CGTAGCTAGGCTAACGTTGACGATGCGTACGCTTAGCATGACCGATCGTAGCATCGTACGAT"
+seq3 = "GCTAGCATGACGATCGTACGTAGCATGCGTACGATCGTAGCTAGGCTAGCATGACCGTACGA"
 
-                if codon2 in STOP_CODON:
-                    length = j + 3 - i
-
-                    if length > maxLength:
-                        maxLength = length
-                    break
-            if maxLength == 0:
-                maxLength = len(sequence) - i
-
-    return maxLength
+print("Score 1:", ficketScore(seq1))
+print("Score 2:", ficketScore(seq2))
+print("Score 3:", ficketScore(seq3))

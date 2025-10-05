@@ -15,13 +15,13 @@ class MultiGapKernelConvolution(nn.Module):
         self,
         inputChannels,
         outputChannelsBranch:int,
-        kernelList: list            = [3,4,5,6,7,11],
-        gapList: list               = [1,2,3],
+        kernelList: list            = Types.DEFAULT_MULTI_GAP_KERNEL_KERNEL_LIST,
+        gapList: list               = Types.DEFAULT_MULTI_GAP_KERNEL_GAP_LIST,
         stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
         padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
-        dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
+        dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
         debug: bool                 = Types.DEFAULT_DEBUG_MODE
         ):
         super().__init__()

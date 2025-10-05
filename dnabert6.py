@@ -16,8 +16,6 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 
-### The projection to fixed size needs to be tested with real data coding, non coding
-
 class DNABERT6:
 
     def __init__(
@@ -34,9 +32,7 @@ class DNABERT6:
                 fineTuneTrainBatchSize                  = Types.DEFAULT_DNABERT6_BATCH_SIZE,
                 embeddingsBatchSize                     = Types.DEFAULT_DNABERT6_BATCH_SIZE,
                 device: str                             = Types.DEFAULT_DNABERT6_DEVICE,
-                projectionState: Types.ProjectionState  = Types.ProjectionState.NO_PROJECTION,
-                projectionDimension: int                = None,
-                hiddenState: Types.HiddenState          = Types.HiddenState.CLS,
+                hiddenState: Types.HiddenState          = Types.HiddenState.BOTH,
                 strategy: str                           = Types.DEFAULT_DNABERT6_STRATEGY,
                 metric: str                             = Types.DEFAULT_DNABER6_METRIC,
                 saveDir : str                           = Types.DEFAULT_DNABER6_SAVE_DIRECTORY
@@ -59,35 +55,11 @@ class DNABERT6:
 
         self.hiddenState = hiddenState
 
-        # Inititalize projection state, projection dimension and projection member variables
-
-        self.projectionState = projectionState
-        self.linear = None
-
         if self.hiddenState == Types.HiddenState.BOTH:
             self.projectionDimension = 2 * Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION
 
         else:
             self.projectionDimension = Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION
-
-        if self.projectionState != Types.ProjectionState.NO_PROJECTION and projectionDimension == None:
-            self.projectionState = Types.ProjectionState.NO_PROJECTION
-
-        elif self.projectionState == Types.ProjectionState.NOT_TRAINABLE:
-            self.projectionDimension = Types.projectionDimension
-
-            # frozen projection (built each call, no grad)
-            self.linear = torch.nn.Linear(Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
-            torch.nn.init.xavier_uniform_(self.linear.weight)
-            for p in self.linear.parameters():
-                p.requires_grad = False
-
-        elif self.projectionState == Types.ProjectionState.TRAINABLE:
-            self.projectionDimension = projectionDimension
-
-            #trainable projection
-            self.linear = torch.nn.Linear(Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION, self.projectionDimension, bias=False).to(self.device)
-            torch.nn.init.xavier_uniform_(self.linear.weight)
 
         self.trainingDatasetPercentage = trainDatasetPercentage
         self.trainingDataPath = trainingDataPath
@@ -118,7 +90,6 @@ class DNABERT6:
         print(f"Finetuning eval barch size: {self.fineTuneEvalBatchSize}")
         print(f"Finetuning train batch size: {self.fineTuneTrainBatchSize}")
         print(f"Embeddings batch size: {self.embeddingsBatchSize}")
-        print(f"Projection state: {self.projectionState}")
         print(f"Projection dimension: {self.projectionDimension}")
         print(f"Hidden state: {self.hiddenState}")
         print(f"Evaluation, logging and save stratefy: {self.strategy}")
@@ -245,7 +216,7 @@ class DNABERT6:
         """
         Convert batched string to sequences to kmers and return tokenizer
         """
-        batchKmers = [Helpers.kmer(seq, Types.DEFAULT_DNABERT6_KMER_SIZE, Types.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
+        batchKmers = [Helpers.kmerDnabert(seq, Types.DEFAULT_DNABERT6_KMER_SIZE, Types.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
 
         return self.tokenizer(
             batchKmers,
@@ -310,7 +281,7 @@ class DNABERT6:
             for i in range(0, len(sequences), self.embeddingsBatchSize):
 
                 batch = sequences[i : i + self.embeddingsBatchSize]
-                batchedKmers = [Helpers.kmer(seq, Types.DEFAULT_DNABERT6_KMER_SIZE, Types.KmerAmbiguousState.MASK) for seq in batch]
+                batchedKmers = [Helpers.kmerDnabert(seq, Types.DEFAULT_DNABERT6_KMER_SIZE, Types.KmerAmbiguousState.MASK) for seq in batch]
 
                 toks  = self.tokenizer(
                     batchedKmers,
@@ -327,9 +298,6 @@ class DNABERT6:
                                 
                 hidden = self.model.base_model(input_ids=toks["input_ids"], attention_mask=attentionMask).last_hidden_state
                 pooled = self._poolHidden(hidden, attentionMask, self.hiddenState, specialTokensMask)
-
-                if self.linear is not None:
-                    pooled = F.relu(self.linear(pooled))
 
                 vecs[idx : idx + pooled.size(0)] = pooled.cpu().numpy()
                 idx += pooled.size(0)

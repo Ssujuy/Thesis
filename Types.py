@@ -51,19 +51,27 @@ DEFAULT_MULTI_KERNEL_KERNEL_LIST:           list        = [3,5,7,11,15]
 DEFAULT_MULTI_KERNEL_PER_KERNEL_OUTPUT:     int         = 64
 ########## ----------- End --------- ##########
 
+########## ----------- Multi Gap Kernel Convolution Defaults --------- ##########
+DEFAULT_MULTI_GAP_KERNEL_KERNEL_LIST:        list        = [3,5,7,11,15]
+DEFAULT_MULTI_GAP_KERNEL_GAP_LIST:           list        = [1,2,3]
+DEFAULT_MULTI_GAP_KERNEL_OUTPUT:             int         = 64
+########## ----------- End --------- ##########
+
 ########## ----------- Temporal Head Defaults --------- ##########
 DEFAULT_TEMPORAL_HIDDEN_CHANNELS:            int         = 512
 DEFAULT_TEMPORAL_KERNEL_REDUCTION:           int         = 1
 DEFAULT_TEMPORAL_KERNEL_RESIDUAL:            int         = 3
-DEFAULT_TEMPORAL_DROPOUT:                    float       = 0.0
 DEFAULT_TEMPORAL_MULTI_DILATION:             bool        = True
 DEFAULT_RESIDUAL_BLOCKS_NMB:                 int         = 2
 ########## ----------- Temporal Head Defaults --------- ##########
 
 ########## ----------- SMORF CNN Classifier Defaults --------- ##########
-DEFAULT_SMORFCNN_TEMPORAL_HEAD:              bool        = True
 DEFAULT_SMORFCNN_MULTI_KERNEL:               bool        = True
-DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST:         list        = [3,4,5,6,7,11]
+DEFAULT_SMORFCNN_MULTI_GAP_KERNEL:           bool        = True
+DEFAULT_SMORFCNN_DNABERT:                    bool        = True
+DEFAULT_SMORFCNN_MULTI_KERNEL_LIST:          list        = [3,4,5,6,7,11]
+DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_LIST:      list        = [3,4,5,6,7,11]
+DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_GAP_LIST:  list        = [1,2,3]      
 DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL:     int         = 256
 DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL:   int         = 512
 DEFAULT_SMORFCNN_RESIDUAL_BLOCKS:            int         = 2
@@ -107,12 +115,6 @@ class KmerAmbiguousState(Enum):
 
     MASK = 0,
     UNK = 1
-
-class ProjectionState(Enum):
-
-    NO_PROJECTION = 0
-    NOT_TRAINABLE = 1
-    TRAINABLE = 2
 
 class HiddenState(Enum):
 

@@ -15,8 +15,6 @@ def finetune(
     finetuneEvalBatchSize: int,
     finetuneTrainBatchSize: int,
     embeddingsBatchSize: int,
-    projectionState: Types.ProjectionState,
-    projectionDimension: int,
     hiddenState: Types.HiddenState,
     saveDir: str
 ):
@@ -32,8 +30,6 @@ def finetune(
         fineTuneEvalBatchSize=finetuneEvalBatchSize,
         fineTuneTrainBatchSize=finetuneTrainBatchSize,
         embeddingsBatchSize=embeddingsBatchSize,
-        projectionState=projectionState,
-        projectionDimension=projectionDimension,
         hiddenState=hiddenState,
         saveDir=saveDir
     )
@@ -46,14 +42,10 @@ def featureExtraction(
     modelDirectory: str,
     sequencesPath: str,
     saveFeaturesPath: str,
-    projectionState: Types.ProjectionState,
-    projectionDimension: int,
     hiddenState: Types.HiddenState,
 ):
     
     model = dnabert6.DNABERT6(
-        projectionState=projectionState,
-        projectionDimension=projectionDimension,
         hiddenState=hiddenState
     )
 
@@ -88,8 +80,6 @@ def featureExtraction(
     metadata = {
         "model_dir": str(Path(modelDirectory).resolve()),
         "hidden_state": getattr(hiddenState, "name", str(hiddenState)),
-        "projection_state": getattr(projectionState, "name", str(projectionState)),
-        "projection_dim": int(projectionDimension) if projectionDimension is not None else None,
         "window_size": model.windowSize,
         "embedding_dim": int(embedTensor.shape[1]),
         "num_samples": len(sequences),
@@ -126,8 +116,6 @@ if __name__ == "__main__":
     ft.add_argument("--finetuneEvalBatchSize", type=int, default=Types.DEFAULT_DNABERT6_BATCH_SIZE)
     ft.add_argument("--finetuneTrainBatchSize", type=int, default=Types.DEFAULT_DNABERT6_BATCH_SIZE)
     ft.add_argument("--embeddingsBatchSize", type=int, default=Types.DEFAULT_DNABERT6_BATCH_SIZE)
-    ft.add_argument("--projectionState", type=int, choices=[0, 1, 2], default=0, help="0=no projection, 1=frozen (non-trainable) projection, 2=trainable projection.")
-    ft.add_argument("--projectionDimension", type=int, default=None, help="Size of the embeddings projection.")
     ft.add_argument("--hiddenState", type=str, choices=["cls", "mean", "both"], default='cls', help="Pooling: 'cls', 'mean', or 'both'.")
     ft.add_argument("--saveDirectory", type=str, default=Types.DEFAULT_DNABER6_SAVE_DIRECTORY,help="Directory to save the finetuned model.")
 
@@ -135,8 +123,6 @@ if __name__ == "__main__":
     emb.add_argument("--modelDirectory", type=str, required=True, default=Types.DEFAULT_DNABER6_SAVE_DIRECTORY)
     emb.add_argument("--sequencesPath", type=str, required=True)
     emb.add_argument("--saveFeaturesPath", type=str, required=True)
-    emb.add_argument("--projectionState", type=int, choices=[0, 1, 2], default=0, help="0=no projection, 1=frozen (non-trainable) projection, 2=trainable projection.")
-    emb.add_argument("--projectionDimension", type=int, default=None, help="Size of the embeddings projection.")
     emb.add_argument("--hiddenState", type=str, choices=["cls", "mean", "both"], default='both', help="Pooling: 'cls', 'mean', or 'both'.")
 
     args = parser.parse_args()
@@ -145,11 +131,6 @@ if __name__ == "__main__":
 
         print("Initializing DNABERT6 model and starting finetune process")
 
-        projStateMap = {
-            0: Types.ProjectionState.NO_PROJECTION,
-            1: Types.ProjectionState.NOT_TRAINABLE,
-            2: Types.ProjectionState.TRAINABLE,
-        }
         hiddenStateMap = {
             "cls":  Types.HiddenState.CLS,
             "mean": Types.HiddenState.MEAN,
@@ -167,8 +148,6 @@ if __name__ == "__main__":
             args.finetuneEvalBatchSize,
             args.finetuneTrainBatchSize,
             args.embeddingsBatchSize,
-            projStateMap[args.projectionState],
-            args.projectionDimension,
             hiddenStateMap[args.hiddenState],
             args.saveDirectory
         )
@@ -177,17 +156,7 @@ if __name__ == "__main__":
 
         print("Loading DNABERT6 model to extract embeddings and compute other features")
 
-        projectionState = None
         hiddenState = None
-
-        if args.projectionState == 0:
-            projectionState = Types.ProjectionState.NO_PROJECTION
-        elif args.projectionState == 1:
-            projectionState = Types.ProjectionState.NOT_TRAINABLE
-        elif args.projectionState == 2:
-            projectionState = Types.ProjectionState.TRAINABLE
-        else:
-            raise ValueError("Projection State accepts values 0,1,2")
 
         if args.hiddenState == 'cls':
             hiddenState = Types.HiddenState.CLS
@@ -202,8 +171,6 @@ if __name__ == "__main__":
             args.modelDirectory,
             args.sequencesPath,
             args.saveFeaturesPath,
-            projectionState,
-            args.projectionDimension,
             hiddenState,
         )
     

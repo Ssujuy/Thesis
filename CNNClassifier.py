@@ -42,11 +42,20 @@ class SmORFCNN(nn.Module):
     multikernel : bool
         Activates Multi Kernel Block.
 
-    onehotKernelList : list
-        List of different kernel sizes.
+    multiKernelList : list
+        List of different kernel sizes for Multi Kernel Convolution.
+
+    multiGapKernelList : list
+        List of different kernel sizes Multi Gap Kernel Convolution.
     
-    outputChannelsKernel : int
+    multiGapKernelGapList : list
+        List of gaps for Multi Gap Kernel Convolution.            
+
+    outputChannelsPerKernel : int
         Size of C_out, output channels per kernel convolution block.
+    
+    outputChannelsPerGapKernel : int
+        Size of C_out, output channels per gap kernel convolution block.
 
     temporalHeadOutputChannels : int
         Size of C_out, output channels of temporal head block (* 2).
@@ -119,6 +128,20 @@ class SmORFCNN(nn.Module):
     
     Methods
     ----------
+    _initializeEnvironment() -> None:
+        Sets environment config for deterministic algorithm (helps with reproducibillity),\n
+        Sets seed and random seed with model's seed.
+    
+    _calculateFeaturesDim(self) -> int:
+        Calculates total features dim, which is the classifier's input channel, based on active branches.
+    
+    optimizerInit(self) -> torch.optim.Optimizer:
+        Initializes AdamW optimizer, adds weight decay to weight kernels\n
+        and removes it from norms and biases.
+
+    _schedulerInit(self) -> torch.optim.lr_scheduler:
+        Initializes sequential Learning rate schedulers, with warmpup LinearLR and cosine CosineAnnealingLR.
+
     initializeDataset() -> None:
         Uses Helpers function loadFeaturesFromPt in order to load all tensors from pyTorch file in a TensorDataset.\n
         Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
@@ -167,10 +190,13 @@ class SmORFCNN(nn.Module):
         embeddingsInputChannels: int,
         featuresPath: str,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
-        multiGapKernel: bool                    = True,
-        dnabertEmbeddings: bool                 = True,
-        onehotKernelList: list                  = Types.DEFAULT_SMORFCNN_ONEHOT_KERNEL_LIST,
-        outputChannelsKernel: int               = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
+        multiGapKernel: bool                    = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL,
+        dnabertEmbeddings: bool                 = Types.DEFAULT_SMORFCNN_DNABERT,
+        multiKernelList: list                   = Types.DEFAULT_SMORFCNN_MULTI_KERNEL_LIST,
+        multiGapKernelList: list                = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_LIST,
+        multiGapKernelGapList: list             = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_GAP_LIST,
+        outputChannelsPerKernel: int            = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
+        outputChannelsPerGapKernel: int         = Types.DEFAULT_MULTI_GAP_KERNEL_OUTPUT,
         temporalHeadOutputChannels: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL,
         residualBlocks: int                     = Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS,
         classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
@@ -218,11 +244,20 @@ class SmORFCNN(nn.Module):
         multikernel : bool
             Activates Multi Kernel Block.
 
-        onehotKernelList : list
-            List of different kernel sizes.
+        multiKernelList : list
+            List of different kernel sizes for Multi Kernel Convolution.
+
+        multiGapKernelList : list
+            List of different kernel sizes Multi Gap Kernel Convolution.
         
-        outputChannelsKernel : int
+        multiGapKernelGapList : list
+            List of gaps for Multi Gap Kernel Convolution.            
+
+        outputChannelsPerKernel : int
             Size of C_out, output channels per kernel convolution block.
+        
+        outputChannelsPerGapKernel : int
+            Size of C_out, output channels per gap kernel convolution block.
 
         temporalHeadOutputChannels : int
             Size of C_out, output channels of temporal head block (* 2).
@@ -310,8 +345,11 @@ class SmORFCNN(nn.Module):
         self.multiKernel = multiKernel
         self.multiGapKernel = multiGapKernel
         self.dnabertEmbeddings = dnabertEmbeddings
-        self.onehotKernelList = onehotKernelList
-        self.outputChannelsKernel = outputChannelsKernel
+        self.multiKernelList = multiKernelList
+        self.multiGapKernelList = multiGapKernelList
+        self.multiGapKernelGapList = multiGapKernelGapList
+        self.outputChannelsPerKernel = outputChannelsPerKernel
+        self.outputChannelsPerGapKernel = outputChannelsPerGapKernel
         self.temporalHeadOutputChannels = temporalHeadOutputChannels
         self.residualBlocks = residualBlocks
         self.layer1Output = layer1Output
@@ -343,8 +381,8 @@ class SmORFCNN(nn.Module):
         if self.multiKernel:
             self.multiKernelClass = MultiKernelConvolution(
                 inputChannels=self.onehotInputChannels,
-                outputChannelsKernel=self.outputChannelsKernel,
-                kernelList=self.onehotKernelList
+                outputChannelsKernel=self.outputChannelsPerKernel,
+                kernelList=self.multiKernelList
             )
 
             self.multiKernelTemporalClass = TemporalHead(
@@ -356,7 +394,9 @@ class SmORFCNN(nn.Module):
         if self.multiGapKernel:
             self.multiGapKernelClass = MultiGapKernelConvolution(
                 inputChannels=self.onehotInputChannels,
-                outputChannelsBranch=256
+                outputChannelsBranch=self.outputChannelsPerGapKernel,
+                kernelList=self.multiGapKernelList,
+                gapList=self.multiGapKernelGapList
             )
 
             self.multiGapKernelTemporalClass = TemporalHead(
@@ -392,7 +432,7 @@ class SmORFCNN(nn.Module):
 
         self.to(self.device)
 
-    def _initializeEnvironment(self):
+    def _initializeEnvironment(self) -> None:
         """
         Sets environment config for deterministic algorithm (helps with reproducibillity),\n
         Sets seed and random seed with model's seed.
@@ -468,7 +508,7 @@ class SmORFCNN(nn.Module):
     def _optimizerInit(self) -> torch.optim.Optimizer:
         """
         Initializes AdamW optimizer, adds weight decay to weight kernels\n
-        and removes it from norms and biases
+        and removes it from norms and biases.
 
         Return
         ----------
@@ -480,9 +520,9 @@ class SmORFCNN(nn.Module):
             if not param.requires_grad:
                 continue
             if param.ndim == 1 or name.endswith(".bias"):
-                noDecay.append(param)     # norms & biases
+                noDecay.append(param)
             else:
-                decay.append(param)        # weight matrices/kernels
+                decay.append(param)
 
         parameterGroups = [
             {"params": decay,    "weight_decay": self.weightDecay},
@@ -491,34 +531,9 @@ class SmORFCNN(nn.Module):
 
         return torch.optim.AdamW(parameterGroups, lr=self.learningRate, betas=self.betas, eps=self.eps)
 
-    @staticmethod
-    def _best_threshold_for_f1(probs: torch.Tensor, targets: torch.Tensor):  # NEW
-        # probs, targets on CPU 1D
-        p = probs.view(-1).float().numpy()
-        y = targets.view(-1).long().numpy()
-        # candidate thresholds: sorted unique probabilities (plus endpoints)
-        thr = np.unique(p)
-        thr = np.concatenate(([0.0], thr, [1.0]))
-        # vectorized F1 sweep
-        best_f1, best_t = 0.0, 0.5
-        # To keep it simple and fast, sample at most 2048 thresholds
-        if thr.size > 2048:
-            thr = np.linspace(0.0, 1.0, 2048, dtype=np.float64)
-        for t in thr:
-            yhat = (p >= t).astype(np.int32)
-            tp = (yhat & (y == 1)).sum()
-            fp = (yhat & (y == 0)).sum()
-            fn = ((1 - yhat) & (y == 1)).sum()
-            denom = (2*tp + fp + fn)
-            f1 = (2*tp) / denom if denom > 0 else 0.0
-            if f1 > best_f1:
-                best_f1, best_t = f1, float(t)
-        return best_t, best_f1
-
-
     def _schedulerInit(self) -> torch.optim.lr_scheduler:
         """
-        Initializer sequential Learning rate schedulers, with warmpup LinearLR and cosine CosineAnnealingLR.
+        Initializes sequential Learning rate schedulers, with warmpup LinearLR and cosine CosineAnnealingLR.
         """
         if self.trainDataLoader is None:
             AttributeError("Traindataloader must be initialized to calculate size")
@@ -642,14 +657,13 @@ class SmORFCNN(nn.Module):
             iterator = enumerate(self.trainDataLoader)
 
         for i, batch in iterator:
-            xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            xOnehot, maskOnehot, xEmbed, y = batch
 
-            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, maskEmbed, y, "Training", i, epochIndex)
+            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Training", i, epochIndex)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
-            maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
 
             self.optimizer.zero_grad()
@@ -721,14 +735,13 @@ class SmORFCNN(nn.Module):
 
         for j, batch in iterator:
 
-            xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            xOnehot, maskOnehot, xEmbed, y = batch
 
-            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, maskEmbed, y, "Validation", j, epochIndex)
+            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Validation", j, epochIndex)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
-            maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
 
             outputs = self(xOnehot, xEmbed, maskOnehot)
@@ -753,12 +766,6 @@ class SmORFCNN(nn.Module):
         self._debugFinal(probabilities, targets, runningLoss, n, "Validation", epochIndex)
 
         metrics = Helpers.computeEpochMetrics(probabilities, targets, runningLoss, n, self.threshold, epochIndex)
-
-
-        best_t, best_f1 = self._best_threshold_for_f1(probabilities.cpu(), targets.cpu())   # NEW
-        # metrics["best_threshold"] = best_t
-        # metrics["best_f1"] = best_f1
-        print(f"[VAL] best threshold={best_t:.4f}  best F1={best_f1:.4f}") 
 
         metrics = metrics | Helpers.computeEpochROC(probabilities, targets, epochIndex)
 
@@ -797,14 +804,13 @@ class SmORFCNN(nn.Module):
 
         for k, batch in iterator:
 
-            xOnehot, maskOnehot, xEmbed, maskEmbed, y = batch
+            xOnehot, maskOnehot, xEmbed, y = batch
 
-            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, maskEmbed, y, "Testing", k, 1)
+            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Testing", k, 1)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
-            maskEmbed = maskEmbed.to(self.device)
             y = y.to(self.device)
 
             outputs = self(xOnehot, xEmbed, maskOnehot)
@@ -936,27 +942,22 @@ class SmORFCNN(nn.Module):
     def kFoldCrossValidation(self, k: int = Types.DEFAULT_SMORFCNN_KFOLD):
         """
         """
-        fullDataset = ConcatDataset([self.trainDataLoader.dataset, self.validationDataLoader.dataset])
 
-        # ---------- B) Extract labels directly (no type branching) ----------
-        # Assumptions:
-        #   trainLoader.dataset           -> Subset
-        #   trainLoader.dataset.dataset   -> TensorDataset
-        #   trainLoader.dataset.indices   -> index list/array into the base TensorDataset
-        #   base TensorDataset.tensors[-1] is labels [N]
-        tSubset = self.trainDataLoader.dataset
-        valSubset = self.validationDataLoader.dataset
+        originalTrainDataLoader = self.trainDataLoader
+        originalValidationDataLoader = self.validationDataLoader
 
-        tBase = tSubset.dataset          # TensorDataset
-        valBase = valSubset.dataset          # TensorDataset
+        fullDataset = ConcatDataset([originalTrainDataLoader.dataset, originalValidationDataLoader.dataset])
+
+        tSubset, vSubset = originalTrainDataLoader.dataset, originalValidationDataLoader.dataset
+
+        tBase, vBase = tSubset.dataset, vSubset.dataset
 
         tIdx = torch.as_tensor(tSubset.indices, dtype=torch.long)
-        valIdx = torch.as_tensor(valSubset.indices, dtype=torch.long)
+        vIdx = torch.as_tensor(vSubset.indices, dtype=torch.long)
 
-        tLabels = tBase.tensors[-1].index_select(0, tIdx)  # [N_tr]
-        valLabels = valBase.tensors[-1].index_select(0, valIdx)  # [N_va]
-
-        labels = torch.cat([tLabels, valLabels], dim=0).detach().cpu().long().numpy()  # [N_tr+N_va]
+        tLabels = tBase.tensors[-1].index_select(0, tIdx)
+        vLabels = vBase.tensors[-1].index_select(0, vIdx)
+        labels = torch.cat([tLabels, vLabels], dim=0).detach().cpu().long().numpy()
 
         splitter = StratifiedKFold(n_splits=k, shuffle=True, random_state=self.seed)
         splits = list(splitter.split(np.arange(len(labels)), labels))
@@ -966,24 +967,35 @@ class SmORFCNN(nn.Module):
         bestFoldState = None
         bestFold = None
 
+        initialState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
+
         iterator = tqdm(enumerate(splits, start=1),total=k,desc=f"{k}-Fold CV",leave=True)
 
         for foldIndex, (trainIndex, valIndex) in iterator:
 
             print(f"\n=== Fold {foldIndex}/{k}: train={len(trainIndex)}  val={len(valIndex)} ===")
 
+            torch.manual_seed(self.seed + foldIndex)
+            np.random.seed(self.seed + foldIndex)
+            random.seed(self.seed + foldIndex)
+
+            self.load_state_dict(initialState)
+            self.to(self.device)
+
             trainDataset = Subset(fullDataset, indices=trainIndex)
             valDataset = Subset(fullDataset, indices=valIndex)
 
-            trainDataloader = DataLoader(
+            self.trainDataLoader = DataLoader(
                 trainDataset,
                 batch_size=self.trainBatchSize,
                 shuffle=True,
                 num_workers=0,
                 pin_memory=False,
-                drop_last=False
+                drop_last=False,
+                worker_init_fn=lambda wid: np.random.seed(self.seed + foldIndex + wid),
+                generator=torch.Generator().manual_seed(self.seed + foldIndex)
             )
-            validationDataloader = DataLoader(
+            self.validationDataLoader = DataLoader(
                 valDataset,
                 batch_size=self.validationBatchSize,
                 shuffle=False,
@@ -991,24 +1003,11 @@ class SmORFCNN(nn.Module):
                 pin_memory=False
             )
 
-            # # ---------- F) Reinitialize model for an independent fold run ----------
-            # def _init(m):
-            #     if hasattr(m, "reset_parameters"):
-            #         m.reset_parameters()
-            # self.apply(_init)
-            # self.to(self.device)
+            self.optimizer  = self._optimizerInit()
+            self.scheduler  = self._schedulerInit()
 
-            _ = self.fit(
-                trainLoader=trainDataloader,
-                valLoader=validationDataloader,
-                epochs=self.epochs
-            )
-
-            metrics = self.validateEpoch(
-                validationData=validationDataloader,
-                epochIndex=foldIndex,
-            )
-
+            _ = self.fit(epochs=self.epochs)
+            metrics = self.validateEpoch(epochIndex=foldIndex)
             foldMetrics.append(metrics)
 
             if metrics["f1"] > bestFoldF1:
@@ -1016,13 +1015,17 @@ class SmORFCNN(nn.Module):
                 bestFold = foldIndex
                 bestFoldState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
 
-            if 'tqdm' in locals():
-                iterator.set_postfix_str(f"F1 {metrics['f1']:.4f}  AUC {metrics.get('roc_auc', float('nan')):.4f}")
+            iterator.set_postfix_str(
+                f"F1 {metrics['f1']:.4f}  AUC {metrics.get('roc_auc', float('nan')):.4f}"
+            )
 
         if bestFoldState is not None:
             self.load_state_dict(bestFoldState)
             self.to(self.device)
             print(f"\nRestored best fold #{bestFold} (val F1={bestFoldF1:.4f})")
+
+        self.trainDataLoader = originalTrainDataLoader
+        self.validationDataLoader = originalValidationDataLoader
 
         summary = Helpers.kFoldSummary(foldMetrics)
 
@@ -1076,10 +1079,9 @@ class SmORFCNN(nn.Module):
                 f"sample={logits.detach().view(-1)[:8].cpu().tolist()}")
             self.forwardDebugOnce = False
 
-    def _debugInEpoch(self, xOnehot, maskOnehot, xEmbed, maskEmbed, y, func, index, epochIndex):
+    def _debugInEpoch(self, xOnehot, maskOnehot, xEmbed, y, func, index, epochIndex):
         if index == 0 and epochIndex == 1 and self.debugMode:
             print(f"[{func} Epoch-{epochIndex}] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
-                f"xEmbed={tuple(xEmbed.shape)} maskEmbed={tuple(maskEmbed.shape)} y={tuple(y.shape)} "
                 f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
             print(f"[{func} Epoch-{epochIndex}] xEmbed stats: min={xEmbed.min().item():.3f} max={xEmbed.max().item():.3f} mean={xEmbed.float().mean().item():.3f} "
                 f"len(T)={xEmbed.shape[-1]}")
@@ -1096,4 +1098,4 @@ class SmORFCNN(nn.Module):
 
 mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
 mymodel.initializeDataset()
-mymodel.fit(10)
+mymodel.kFoldCrossValidation(10)

@@ -88,7 +88,7 @@ class TemporalHead(nn.Module):
         padding                     = Types.DEFAULT_CONVOLUTION_PADDING,
         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
-        dropout: float              = Types.DEFAULT_TEMPORAL_DROPOUT,
+        dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
         bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
         multipleDilation: bool      = Types.DEFAULT_TEMPORAL_MULTI_DILATION,
         residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB,
