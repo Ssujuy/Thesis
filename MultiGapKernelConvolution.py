@@ -142,7 +142,7 @@ class MultiGapKernelConvolution(nn.Module):
                 self.branches.append(
                     ConvolutionBlock(
                         inputChannels=self.inputChannels,
-                        outputChannels=self.outputChannelsGKernel,
+                        outputChannels=self.outputChannelsBranch,
                         kernel=k,
                         stride=self.stride,
                         padding=self.padding,

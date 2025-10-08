@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim.lr_scheduler as lrScheduler
 from torch.utils.data import DataLoader, ConcatDataset, Subset
 from sklearn.model_selection import StratifiedKFold
+from pathlib import Path
 
 import Types, Helpers
 from MultiKernelConvolution import MultiKernelConvolution
@@ -26,6 +27,9 @@ class SmORFCNN(nn.Module):
     
     Attributes
     ----------
+    saveModelPath : str
+        Path to save the trained model.
+
     onehotInputChannels : int
         Size of onehot encoded sequences.
 
@@ -186,6 +190,7 @@ class SmORFCNN(nn.Module):
     """
     def __init__(
         self,
+        saveModelPath: str,
         onehotInputChannels: int,
         embeddingsInputChannels: int,
         featuresPath: str,
@@ -228,6 +233,9 @@ class SmORFCNN(nn.Module):
 
         Parameters
         ----------
+        saveModelPath : str
+            Path to save the trained model.
+
         onehotInputChannels : int
             Size of onehot encoded sequences.
 
@@ -339,6 +347,7 @@ class SmORFCNN(nn.Module):
 
         self._initializeEnvironment()
 
+        self.saveModelPath = saveModelPath
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
 
@@ -394,7 +403,7 @@ class SmORFCNN(nn.Module):
         if self.multiGapKernel:
             self.multiGapKernelClass = MultiGapKernelConvolution(
                 inputChannels=self.onehotInputChannels,
-                outputChannelsBranch=self.outputChannelsPerGapKernel,
+                outputChannelsGKernel=self.outputChannelsPerGapKernel,
                 kernelList=self.multiGapKernelList,
                 gapList=self.multiGapKernelGapList
             )
@@ -937,6 +946,8 @@ class SmORFCNN(nn.Module):
 
         Helpers.plotConfusionPie(trainingMetrics, validationMetrics, testMetrics, epochs)
 
+        self.saveModel()
+
         return trainingMetrics, validationMetrics
 
     def kFoldCrossValidation(self, k: int = Types.DEFAULT_SMORFCNN_KFOLD):
@@ -1035,9 +1046,40 @@ class SmORFCNN(nn.Module):
 
         return foldMetrics, summary
 
-    def saveModel() -> None:
-        return
-    
+    def saveModel(self) -> None:
+        """
+        Save a single checkpoint file with config + weights (+ optional opt/sched).
+        """
+        path = Path(self.saveModelPath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {
+            "format_version": 1,
+            "model_class": self.__class__.__name__,
+            # "config": self.to_config(),
+            "state_dict": self.state_dict(),
+            "threshold": getattr(self, "threshold", None),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.scheduler.state_dict()
+        }
+
+        torch.save(checkpoint, str(path))
+        print(f"Trained CNN smORF Classifier successfully saved to: {path.resolve()}")
+
+    @classmethod
+    def load(path: str, strict: bool = True) -> "SmORFCNN":
+        """
+        Load model (architecture + weights) for inference or training.
+        """
+        ckpt = torch.load(str(path), map_location="cpu")
+        config = ckpt["config"]
+        model = cls.from_config(config)
+        model.load_state_dict(ckpt["state_dict"], strict=strict)
+        model.threshold = ckpt["threshold"]
+        model.to(config.get("device", "cpu"))
+        model.eval()
+        return model
+
     def _debugInit(self):
 
         if self.debugMode:
@@ -1096,6 +1138,6 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
+mymodel = SmORFCNN("smorfCNN.pt",4,1536,"features.pt",debug=False)
 mymodel.initializeDataset()
-mymodel.kFoldCrossValidation(10)
+mymodel.fit(1)
