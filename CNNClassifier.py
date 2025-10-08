@@ -1,4 +1,4 @@
-import torch,os,random
+import torch,os,random,json
 from tqdm import tqdm
 import numpy as np
 import torch.nn as nn
@@ -27,9 +27,6 @@ class SmORFCNN(nn.Module):
     
     Attributes
     ----------
-    saveModelPath : str
-        Path to save the trained model.
-
     onehotInputChannels : int
         Size of onehot encoded sequences.
 
@@ -39,6 +36,9 @@ class SmORFCNN(nn.Module):
     featuresPath: str
         Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
         for valid=1, padded=0 positions and dnabert6 embeddings
+
+    saveModelPathDir : str
+        Directory to save the trained model and configuration.
 
     temporalHead : bool
         Activates Temporal Head Block.
@@ -190,10 +190,10 @@ class SmORFCNN(nn.Module):
     """
     def __init__(
         self,
-        saveModelPath: str,
         onehotInputChannels: int,
         embeddingsInputChannels: int,
         featuresPath: str,
+        saveModelPathDir: str                   = Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         multiGapKernel: bool                    = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL,
         dnabertEmbeddings: bool                 = Types.DEFAULT_SMORFCNN_DNABERT,
@@ -233,9 +233,6 @@ class SmORFCNN(nn.Module):
 
         Parameters
         ----------
-        saveModelPath : str
-            Path to save the trained model.
-
         onehotInputChannels : int
             Size of onehot encoded sequences.
 
@@ -245,6 +242,9 @@ class SmORFCNN(nn.Module):
         featuresPath: str
             Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
             for valid=1, padded=0 positions and dnabert6 embeddings
+
+        saveModelPathDir : str
+            Directory to save the trained model and configuration.
 
         temporalHead : bool
             Activates Temporal Head Block.
@@ -347,7 +347,10 @@ class SmORFCNN(nn.Module):
 
         self._initializeEnvironment()
 
-        self.saveModelPath = saveModelPath
+        self.saveModelPathDir = saveModelPathDir
+        self.saveModelConfigPath = f"{self.saveModelPathDir}/{self.self.saveModelPathDir}.json"
+        self.saveModelWeightsPath = f"{self.saveModelPathDir}/{self.self.saveModelPathDir}.pt"
+
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
 
@@ -440,6 +443,145 @@ class SmORFCNN(nn.Module):
         self.testDataLoader = None
 
         self.to(self.device)
+
+    @classmethod
+    def fromJson(cls, path: str) -> "SmORFCNN":
+        """
+        Read JSON config file from configPath file path, initialize and the SmORFCNN model.\n
+        Using @classmethod, cls can be used as self for SmORFCNN class.
+
+        Parameters
+        ----------
+        cls : Type[Self@SmORFCNN]
+            Same as self for SmORFCNN class.
+        
+        path : str 
+            Path to JSON file to load configuration.
+        
+        Return
+        ----------
+        SmORFCNN
+            class model SmORFCNN.
+        """
+
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+
+        config = json.loads(Path(path).read_text(encoding="utf-8"))
+
+        if config["onehotInputChannels"] is None:
+            raise KeyError("Key onehotInputChannels does not exist in the configuration file.")
+        
+        if config["embeddingsInputChannels"] is None:
+            raise KeyError("Key embeddingsInputChannels does not exist in the configuration file.")
+
+        if config["featuresPath"] is None:
+            raise KeyError("Key featuresPath does not exist in the configuration file.")       
+
+        return cls(
+            onehotInputChannels         = config["onehotInputChannels"],
+            embeddingsInputChannels     = config["embeddingsInputChannels"],
+            featuresPath                = config["featuresPath"],
+            saveModelPathDir            = config.get("saveModelPathDir",              Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH),
+            multiKernel                 = config.get("multiKernel",                   Types.DEFAULT_SMORFCNN_MULTI_KERNEL),
+            multiGapKernel              = config.get("multiGapKernel",                Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL),
+            dnabertEmbeddings           = config.get("dnabertEmbeddings",             Types.DEFAULT_SMORFCNN_DNABERT),
+            multiKernelList             = config.get("multiKernelList",               Types.DEFAULT_SMORFCNN_MULTI_KERNEL_LIST),
+            multiGapKernelList          = config.get("multiGapKernelList",            Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_LIST),
+            multiGapKernelGapList       = config.get("multiGapKernelGapList",         Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_GAP_LIST),
+            outputChannelsPerKernel     = config.get("outputChannelsPerKernel",       Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL),
+            outputChannelsPerGapKernel  = config.get("outputChannelsPerGapKernel",    Types.DEFAULT_MULTI_GAP_KERNEL_OUTPUT),
+            temporalHeadOutputChannels  = config.get("temporalHeadOutputChannels",    Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL),
+            residualBlocks              = config.get("residualBlocks",                Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS),
+            classes                     = config.get("classes",                       Types.DEFAULT_SMORFCNN_CLASSES),
+            layer1Output                = config.get("layer1Output",                  Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT),
+            layer2Output                = config.get("layer2Output",                  Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_OUTPUT),
+            classifierDropout           = config.get("classifierDropout",             Types.DEFAULT_SMORFCNN_CLASSIFIER_DROPOUT),
+            learningRate                = config.get("learningRate",                  Types.DEFAULT_SMORFCNN_LEARNING_RATE),
+            weightDecay                 = config.get("weightDecay",                   Types.DEFAULT_SMORFCNN_WEIGHT_DECAY),
+            minLearningRate             = config.get("minLearningRate",               Types.DEFAULT_SMORFCNN_MINIMUM_LEARNING_RATE),
+            schedulerFactor             = config.get("schedulerFactor",               Types.DEFAULT_SMORFCNN_SCHEDULER_FACTOR),
+            schedulerWarmup             = config.get("schedulerWarmup",               Types.DEFAULT_SMORFCNN_SCHEDULER_WARMUP),
+            threshold                   = config.get("threshold",                     Types.DEFAULT_SMORFCNN_THRESHOLD),
+            maxGradNorm                 = config.get("maxGradNorm",                   Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM),
+            seed                        = config.get("seed",                          Types.DEFAULT_SMORFCNN_SEED),
+            deterministic               = config.get("deterministic",                 Types.DEFAULT_SMORFCNN_DETERMINISTIC),
+            device                      = config.get("device",                        Types.DEFAULT_SMORFCNN_DEVICE),
+            trainBatchSize              = config.get("trainBatchSize",                Types.DEFAULT_SMORFCNN_TRAIN_BATCH_SIZE),
+            valBatchSize                = config.get("valBatchSize",                  Types.DEFAULT_SMORFCNN_VALIDATION_BATCH_SIZE),
+            testBatchSize               = config.get("testBatchSize",                 Types.DEFAULT_SMORFCNN_TEST_BATCH_SIZE),
+            trainSplit                  = config.get("trainSplit",                    Types.DEFAULT_SMORFCNN_TRAIN_SPLIT),
+            valSplit                    = config.get("valSplit",                      Types.DEFAULT_SMORFCNN_VALIDATION_SPLIT),
+            testSplit                   = config.get("testSplit",                     Types.DEFAULT_SMORFCNN_TEST_SPLIT),
+            epochs                      = config.get("epochs",                        Types.DEFAULT_SMORFCNN_EPOCHS),
+            debug                       = config.get("debug",                         Types.DEFAULT_DEBUG_MODE),
+        )
+
+    def toJson(self) -> dict:
+        """
+        Saves all attributes of the model inside a dictionary and returns it.
+
+        Return
+        ----------
+        config
+            model's attributes in dictionary.
+        """
+
+        config = {
+            "saveModelPathDir":           self.saveModelPathDir,
+            "onehotInputChannels":        self.onehotInputChannels,
+            "embeddingsInputChannels":    self.embeddingsInputChannels,
+            "featuresPath":               self.featuresPath,
+            "multiKernel":                self.multiKernel,
+            "multiGapKernel":             self.multiGapKernel,
+            "dnabertEmbeddings":          self.dnabertEmbeddings,
+            "multiKernelList":            self.multiKernelList,
+            "multiGapKernelList":         self.multiGapKernelList,
+            "multiGapKernelGapList":      self.multiGapKernelGapList,
+            "outputChannelsPerKernel":    self.outputChannelsPerKernel,
+            "outputChannelsPerGapKernel": self.outputChannelsPerGapKernel,
+            "temporalHeadOutputChannels": self.temporalHeadOutputChannels,
+            "residualBlocks":             self.residualBlocks,
+            "classes":                    self.classes,
+            "layer1Output":               self.layer1Output,
+            "layer2Output":               self.layer2Output,
+            "classifierDropout":          self.classifierDropout,
+            "learningRate":               self.learningRate,
+            "weightDecay":                self.weightDecay,
+            "minLearningRate":            self.minLearningRate,
+            "schedulerFactor":            self.schedulerFactor,
+            "schedulerWarmup":            self.schedulerWarmpup,
+            "threshold":                  self.threshold,
+            "maxGradNorm":                self.maxGradNorm,
+            "seed":                       self.seed,
+            "deterministic":              self.deterministic,
+            "device":                     self.device,
+            "trainBatchSize":             self.trainBatchSize,
+            "valBatchSize":               self.validationBatchSize,
+            "testBatchSize":              self.testBatchSize,
+            "trainSplit":                 self.trainSplit,
+            "valSplit":                   self.validationSplit,
+            "testSplit":                  self.testSplit,
+            "epochs":                     self.epochs,
+            "debug":                      self.debugMode,
+        }
+
+        return config
+
+    def saveConfig(self) -> None:
+        """
+        Saves config file to saveModelConfigPath file path.
+        """
+
+        path = Path(self.saveModelConfigPath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        config = self.toJson()
+
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(config, file, indent=2, sort_keys=True)
+
+        print(f"Configuration saved to: {path.resolve()}")
 
     def _initializeEnvironment(self) -> None:
         """
@@ -1048,17 +1190,20 @@ class SmORFCNN(nn.Module):
 
     def saveModel(self) -> None:
         """
-        Save a single checkpoint file with config + weights (+ optional opt/sched).
+        Save a single checkpoint file with config + weights (+ optional opt/sched) to saveModelWeightsPath file path.
         """
-        path = Path(self.saveModelPath)
+
+        self.saveConfig()
+
+        path = Path(self.saveModelWeightsPath)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         checkpoint = {
             "format_version": 1,
             "model_class": self.__class__.__name__,
-            # "config": self.to_config(),
+            "configPath": self.saveModelConfigPath,
             "state_dict": self.state_dict(),
-            "threshold": getattr(self, "threshold", None),
+            "threshold": self.threshold,
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": self.scheduler.state_dict()
         }
@@ -1067,17 +1212,32 @@ class SmORFCNN(nn.Module):
         print(f"Trained CNN smORF Classifier successfully saved to: {path.resolve()}")
 
     @classmethod
-    def load(path: str, strict: bool = True) -> "SmORFCNN":
+    def load(cls, path: str) -> "SmORFCNN":
         """
-        Load model (architecture + weights) for inference or training.
+        Load model (architecture + weights) from path, then return the initialized model.
+
+        Parameters
+        ----------
+        cls : Type[Self@SmORFCNN]
+            Same as self for SmORFCNN class.
+        
+        path : str 
+            Path to pyTorch file that the model's checkpoint weas saved.
+        
+        Return
+        ----------
+        model
+            SmORFCNN class model, loaded from pyTorch file and JSOn configuration file.
         """
-        ckpt = torch.load(str(path), map_location="cpu")
-        config = ckpt["config"]
-        model = cls.from_config(config)
-        model.load_state_dict(ckpt["state_dict"], strict=strict)
-        model.threshold = ckpt["threshold"]
-        model.to(config.get("device", "cpu"))
+
+        savedModel = torch.load(str(path), map_location="cpu")
+        model = cls.fromJson(savedModel["configPath"])
+        model.load_state_dict(savedModel["state_dict"], strict=True)
+        model.threshold = savedModel["threshold"]
+        model.to(model.device)
         model.eval()
+
+        print(f"Trained CNN smORF Classifier successfully loaded from: {path.resolve()}")
         return model
 
     def _debugInit(self):
@@ -1138,6 +1298,6 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN("smorfCNN.pt",4,1536,"features.pt",debug=False)
-mymodel.initializeDataset()
-mymodel.fit(1)
+mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
+# mymodel.initializeDataset()
+# mymodel.fit(1)

@@ -66,6 +66,7 @@ DEFAULT_RESIDUAL_BLOCKS_NMB:                 int         = 2
 ########## ----------- Temporal Head Defaults --------- ##########
 
 ########## ----------- SMORF CNN Classifier Defaults --------- ##########
+DEFAULT_SMORFCNN_SAVE_DIR_PATH:              str         = "smorfCNN"
 DEFAULT_SMORFCNN_MULTI_KERNEL:               bool        = True
 DEFAULT_SMORFCNN_MULTI_GAP_KERNEL:           bool        = True
 DEFAULT_SMORFCNN_DNABERT:                    bool        = True
