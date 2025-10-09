@@ -348,8 +348,8 @@ class SmORFCNN(nn.Module):
         self._initializeEnvironment()
 
         self.saveModelPathDir = saveModelPathDir
-        self.saveModelConfigPath = f"{self.saveModelPathDir}/{self.self.saveModelPathDir}.json"
-        self.saveModelWeightsPath = f"{self.saveModelPathDir}/{self.self.saveModelPathDir}.pt"
+        self.saveModelConfigPath = f"{self.saveModelPathDir}/{self.saveModelPathDir}.json"
+        self.saveModelWeightsPath = f"{self.saveModelPathDir}/{self.saveModelPathDir}.pt"
 
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
@@ -1222,7 +1222,7 @@ class SmORFCNN(nn.Module):
             Same as self for SmORFCNN class.
         
         path : str 
-            Path to pyTorch file that the model's checkpoint weas saved.
+            Path to pyTorch file that the model's checkpoint was saved.
         
         Return
         ----------
@@ -1230,7 +1230,9 @@ class SmORFCNN(nn.Module):
             SmORFCNN class model, loaded from pyTorch file and JSOn configuration file.
         """
 
-        savedModel = torch.load(str(path), map_location="cpu")
+        path = Path(f"{path}/{path}.pt")
+
+        savedModel = torch.load(path, map_location="cpu")
         model = cls.fromJson(savedModel["configPath"])
         model.load_state_dict(savedModel["state_dict"], strict=True)
         model.threshold = savedModel["threshold"]
@@ -1298,6 +1300,7 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
-# mymodel.initializeDataset()
-# mymodel.fit(1)
+# mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
+mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
+mymodel.initializeDataset()
+mymodel.fit(1)
