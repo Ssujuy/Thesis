@@ -5,6 +5,19 @@ from pathlib import Path
 from computationalFeatures import firstORFLength
 import Types
 
+def fastaToList(path: str) -> list:
+    """
+    Generator that parses DNA sequences from FASTA files, cleans them up and returns them in a list.
+    """
+
+    sequenceList = []
+
+    for record in SeqIO.parse(path, "fasta"):
+        cleaned = cleanup(record.seq)
+        sequenceList.append(cleaned)
+
+    return sequenceList
+
 def readFasta(path: str, label: int) -> None:
     """
     Generator that yields (header, cleaned_seq) for every record in the FASTA.

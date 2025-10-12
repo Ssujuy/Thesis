@@ -6,11 +6,14 @@ import torch.optim.lr_scheduler as lrScheduler
 from torch.utils.data import DataLoader, ConcatDataset, Subset
 from sklearn.model_selection import StratifiedKFold
 from pathlib import Path
+import pandas as pd
 
 import Types, Helpers
+from dataRead import fastaToList
 from MultiKernelConvolution import MultiKernelConvolution
 from MultiGapKernelConvolution import MultiGapKernelConvolution
 from TemporalHead import TemporalHead
+from dnabert6 import DNABERT6
 
 # ---------------------------------------------
 # The CNNClassifier for smORFs
@@ -192,7 +195,11 @@ class SmORFCNN(nn.Module):
         self,
         onehotInputChannels: int,
         embeddingsInputChannels: int,
-        featuresPath: str,
+        trainPath: str,
+        predictInputPath: str,
+        predictOutputPath: str,
+        hiddenState: str                        = Types.HiddenState.BOTH,
+        dnabertDirectory: str                   = Types.DEFAULT_DNABER6_SAVE_DIRECTORY,
         saveModelPathDir: str                   = Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         multiGapKernel: bool                    = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL,
@@ -354,6 +361,12 @@ class SmORFCNN(nn.Module):
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
 
+        self.dnabertDirectory = dnabertDirectory
+        self.dnabertHiddenState = hiddenState
+
+        self.predictInputPath = predictInputPath
+        self.predictOutputPath = predictOutputPath
+
         self.multiKernel = multiKernel
         self.multiGapKernel = multiGapKernel
         self.dnabertEmbeddings = dnabertEmbeddings
@@ -385,10 +398,15 @@ class SmORFCNN(nn.Module):
         self.testSplit = testSplit
         self.epochs = epochs
 
+        self.dnabert6Class = None
         self.multiKernelClass = None
         self.multiKernelTemporalClass = None
         self.multiGapKernelClass = None
         self.multiGapKernelTemporalClass = None
+
+        if self.dnabertEmbeddings:
+            self.dnabert6Class = DNABERT6(hiddenState=self.dnabertHiddenState)
+            self.dnabert6Class.load(self.dnabertDirectory)
 
         if self.multiKernel:
             self.multiKernelClass = MultiKernelConvolution(
@@ -482,6 +500,10 @@ class SmORFCNN(nn.Module):
             onehotInputChannels         = config["onehotInputChannels"],
             embeddingsInputChannels     = config["embeddingsInputChannels"],
             featuresPath                = config["featuresPath"],
+            predictInputPath            = config["predictInputPath"],
+            predictOutputPath           = config["predictOutputPath"],
+            hiddenState                 = config.get("hiddenState",                   Types.HiddenState.BOTH),
+            dnabertDirectory            = config.get("dnabertDirectory",              Types.DEFAULT_DNABER6_SAVE_DIRECTORY),
             saveModelPathDir            = config.get("saveModelPathDir",              Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH),
             multiKernel                 = config.get("multiKernel",                   Types.DEFAULT_SMORFCNN_MULTI_KERNEL),
             multiGapKernel              = config.get("multiGapKernel",                Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL),
@@ -532,6 +554,10 @@ class SmORFCNN(nn.Module):
             "onehotInputChannels":        self.onehotInputChannels,
             "embeddingsInputChannels":    self.embeddingsInputChannels,
             "featuresPath":               self.featuresPath,
+            "predictInputPath":           self.predictInputPath,
+            "predictOutputPath":          self.predictOutputPath,
+            "hiddenState":                self.dnabertHiddenState,
+            "dnabertDirectory":           self.dnabertDirectory,
             "multiKernel":                self.multiKernel,
             "multiGapKernel":             self.multiGapKernel,
             "dnabertEmbeddings":          self.dnabertEmbeddings,
@@ -613,10 +639,11 @@ class SmORFCNN(nn.Module):
         Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
         Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
         """
-        tensorDataset = Helpers.loadFeaturesFromPt(self.featuresPath)
+        self.csv_path = Path(self.featuresPath)
+        dataFrame = pd.read_csv(self.csv_path)
 
         self.trainDataLoader, self.validationDataLoader, self.testDataLoader = Helpers.toDataloaders(
-            tensorDataset,
+            dataFrame,
             self.trainSplit,
             self.validationSplit,
             self.testSplit,
@@ -808,7 +835,15 @@ class SmORFCNN(nn.Module):
             iterator = enumerate(self.trainDataLoader)
 
         for i, batch in iterator:
-            xOnehot, maskOnehot, xEmbed, y = batch
+
+            sequences, y = batch
+
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence) for sequence in sequences], dim=0).to(dtype=torch.float32)
+            xOnehot = xOnehot.permute(0, 2, 1).contiguous()
+            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32)
+
+            xEmbed = self.dnabert6Class.embeddings(sequences)
+            xEmbed = torch.from_numpy(xEmbed).contiguous().to(torch.float32)
 
             self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Training", i, epochIndex)
 
@@ -886,7 +921,14 @@ class SmORFCNN(nn.Module):
 
         for j, batch in iterator:
 
-            xOnehot, maskOnehot, xEmbed, y = batch
+            sequences, y = batch
+
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence) for sequence in sequences], dim=0)
+            xOnehot = xOnehot.permute(0, 2, 1).contiguous()
+            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32) 
+
+            xEmbed = self.dnabert6Class.embeddings(sequences)
+            xEmbed = torch.from_numpy(xEmbed).contiguous().to(torch.float32)
 
             self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Validation", j, epochIndex)
 
@@ -955,7 +997,14 @@ class SmORFCNN(nn.Module):
 
         for k, batch in iterator:
 
-            xOnehot, maskOnehot, xEmbed, y = batch
+            sequences, y = batch
+
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence) for sequence in sequences], dim=0)
+            xOnehot = xOnehot.permute(0, 2, 1).contiguous()
+            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32) 
+
+            xEmbed = self.dnabert6Class.embeddings(sequences)
+            xEmbed = torch.from_numpy(xEmbed).contiguous().to(torch.float32)
 
             self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Testing", k, 1)
 
@@ -1188,6 +1237,39 @@ class SmORFCNN(nn.Module):
 
         return foldMetrics, summary
 
+    @torch.no_grad()
+    def predict(self):
+        """
+        """
+        
+        self.eval()
+        results = []
+        sequences = fastaToList(self.predictInputPath)
+
+        for sequence in sequences:
+
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence)], dim=0)
+            xOnehot = xOnehot.permute(0, 2, 1).contiguous()
+
+            maskOneHot = (xOnehot.sum(dim=1) > 0).to(torch.float32)
+
+            xEmbed = self.dnabert6Class.embeddings(sequences)
+            xEmbed = torch.from_numpy(xEmbed).contiguous().to(torch.float32)
+
+            outputs = self(xOnehot, xEmbed, maskOneHot)
+            probs = torch.sigmoid(outputs)
+            preds = (probs >= self.threshold).to(torch.int8)
+
+            for p, pred, s in zip(probs.tolist(), preds.tolist(), sequences):
+                results.append({
+                    "sequence": s,
+                    "prob_coding": float(p),
+                    "pred_label": int(pred)
+                })
+
+        df = pd.DataFrame(results)
+        df.to_csv(self.predictOutputPath, index=False)
+
     def saveModel(self) -> None:
         """
         Save a single checkpoint file with config + weights (+ optional opt/sched) to saveModelWeightsPath file path.
@@ -1300,7 +1382,7 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-# mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
-mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
+mymodel = SmORFCNN(4,1536,"train.csv",debug=False)
+# mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
 mymodel.initializeDataset()
-mymodel.fit(1)
+mymodel.fit(10)

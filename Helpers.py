@@ -4,7 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from datasets import load_dataset, DatasetDict, Dataset
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset, random_split,  Subset
+from sklearn.model_selection import train_test_split
+
 import Types
 
 sequenceMapping = {
@@ -112,7 +114,7 @@ def loadFeaturesFromPt(path: str) -> TensorDataset:
 
     """
     Function to load a pyTorch file and return a TensorDataset.
-    (x_onehot [N,4,L], mask_onehot [N,L], x_embed [N,D,1], mask_embed [N,1], y [N])
+    (x_onehot [N,4,L], mask_onehot [N,L], x_embed [N,D,1], y [N])
     keys in pyTorch file: {"embeddings", "onehot", "labels"}
 
     Parameters
@@ -148,7 +150,7 @@ def loadFeaturesFromPt(path: str) -> TensorDataset:
     return TensorDataset(xOnehot, maskOnehot, xEmbed, y)
 
 def toDataloaders(
-        dataset: TensorDataset,
+        dataFrame: pd.core.frame.DataFrame,
         trainSplit: float,
         validationSplit: float,
         testSplit: float,
@@ -159,13 +161,13 @@ def toDataloaders(
     ):
 
     """
-    Function that takes a TensorDataset as argument, shuffles the dataset
-    then splits it into training, validation and testing DataLoaders.
+    Function that takes a DataFrame (sequence and label columns) as argument,\n
+    shuffles the dataset then splits it into training, validation and testing DataLoaders.
 
     Parameters
     ----------
-    dataset : TensorDataset
-        Dataset to split and create 3 DataLoaders.
+    dataFrame : DataFrame
+        DataFrame to split and create 3 DataLoaders.
 
     trainSplit : float
         Size out of 1 of training's DataLoader.
@@ -194,15 +196,31 @@ def toDataloaders(
         train, validation, test
     """
 
-    n = len(dataset)
-    gen = torch.Generator().manual_seed(seed)
-    nTrain = int(round(trainSplit * n))
-    nVal   = int(round(validationSplit * n))
-    nTest  = n - nTrain - nVal
-    trainDs, validationDs, testDs = random_split(dataset, [nTrain, nVal, nTest], generator=gen)
-    
+    dataFrame["sequence"] = dataFrame["sequence"].astype(str)
+    dataFrame["label"] = dataFrame["label"].astype(int)
+
+    tempDataFrame, testDataFrame = train_test_split(
+        dataFrame,
+        test_size=testSplit,
+        random_state=seed,
+        stratify=dataFrame["label"]
+    )
+
+    validationSplit = validationSplit / (1 - testSplit)
+
+    trainDataFrame, validationDataFrame = train_test_split(
+        tempDataFrame,
+        test_size=validationSplit,
+        random_state=seed,
+        stratify=tempDataFrame["label"]
+    )
+
+    trainData = list(zip(trainDataFrame["sequence"].tolist(), trainDataFrame["label"].tolist()))
+    validationData = list(zip(validationDataFrame["sequence"].tolist(), validationDataFrame["label"].tolist()))
+    testData = list(zip(testDataFrame["sequence"].tolist(), testDataFrame["label"].tolist()))
+
     train = DataLoader(
-        trainDs,
+        trainData,
         batch_size=trainBatchSize,
         shuffle=True,
         num_workers=0,
@@ -211,7 +229,7 @@ def toDataloaders(
     )
 
     validation = DataLoader(
-        validationDs,
+        validationData,
         batch_size=valBatchSize,
         shuffle=False,
         num_workers=0,
@@ -219,7 +237,7 @@ def toDataloaders(
     )
 
     test = DataLoader(
-        testDs,
+        testData,
         batch_size=testBatchSize,
         shuffle=False,
         num_workers=0,
@@ -241,22 +259,19 @@ def printDataloader(name: str, data: DataLoader) -> None:
     """
 
     batches = len(data)
-
     samples = len(data.dataset)
 
-    xOnehot, maskOnehot, xEmbed, y = next(iter(data))
+    sequences, y = next(iter(data))
 
     print(f"Print 3 rows for {name} DataLoader")
     print(f"  - Number of batches: {batches}")
     print(f"  - Number of samples: {samples}")
-    print(f"  - One Hot Encoded sequences shape: {xOnehot.shape}")
-    print(f"  - Mask for One Hot Encoded sequences shape: {maskOnehot.shape}")
-    print(f"  - Embeddings shape: {xEmbed.shape}")
-    print(f"  - Labels shape: {y.shape}")
+    print(f"  - Sequences batch size: {len(sequences)}")
+    print(f"  - Labels shape: {len(y)}")
 
     try:
         batch = next(iter(data))
-        xOnehot, maskOnehot, xEmbed, y = batch
+        sequence, y = batch
 
         table = []
 
@@ -264,9 +279,7 @@ def printDataloader(name: str, data: DataLoader) -> None:
             
             table.append({
                 "index": i,
-                "onehot": xOnehot[i],
-                "maskOnehot": maskOnehot[i],
-                "embeddings": xEmbed[i],
+                "sequences": sequence[i],
                 "labels": y[i]
             })
 
@@ -564,7 +577,7 @@ def computeEpochROC(
     Returns
     ----------
     dict
-        {"auc", "tpr", "fpr"}.
+        {"auc"}.
     """
 
     probabilities = probabilities.detach().view(-1).cpu().numpy().astype(np.float64)
@@ -585,7 +598,7 @@ def computeEpochROC(
     truePositiveRatio = np.concatenate([[0.0], truePositiveRatio, [1.0]])
     auc = float(np.trapz(truePositiveRatio, falsePositiveRatio))
     
-    aucDict = {"auc": auc, "fpr": falsePositiveRatio, "tpr": truePositiveRatio}
+    aucDict = {"auc": auc}
 
     printEpochAUC(aucDict, epochIndex)
 
@@ -745,31 +758,23 @@ def plotLabelDistribution(
     totalLength += len(validationDataLoader.dataset)
     totalLength += len(testDataLoader.dataset)
 
-    ds = trainDataLoader.dataset
-    base = getattr(ds, "dataset", ds)
-    idx = getattr(ds, "indices", torch.arange(len(base)))
-    idx = torch.as_tensor(idx, dtype=torch.long)
-    yTrain = base.tensors[-1].index_select(0, idx).view(-1).cpu()
+    totalPositiveTrain = totalPositiveVal = totalPositiveTest = 0
+    totalNegativeTrain = totalNegativeVal = totalNegativeTest = 0
 
-    ds = validationDataLoader.dataset
-    base = getattr(ds, "dataset", ds)
-    idx = getattr(ds, "indices", torch.arange(len(base)))
-    idx = torch.as_tensor(idx, dtype=torch.long)
-    yVal = base.tensors[-1].index_select(0, idx).view(-1).cpu()
+    for _, y in trainDataLoader:
+        y = y.detach().cpu()
+        totalPositiveTrain += int((y == 1).sum().item())
+        totalNegativeTrain += int((y == 0).sum().item())
+    
+    for _, y in validationDataLoader:
+        y = y.detach().cpu()
+        totalPositiveVal += int((y == 1).sum().item())
+        totalNegativeVal += int((y == 0).sum().item())    
 
-    ds = testDataLoader.dataset
-    base = getattr(ds, "dataset", ds)
-    idx = getattr(ds, "indices", torch.arange(len(base)))
-    idx = torch.as_tensor(idx, dtype=torch.long)
-    yTest = base.tensors[-1].index_select(0, idx).view(-1).cpu()
-
-    totalPositiveTrain = int((yTrain == 1).sum().item())
-    totalPositiveVal = int((yVal == 1).sum().item())
-    totalPositiveTest = int((yTest == 1).sum().item())
-
-    totalNegativeTrain = int((yTrain == 0).sum().item())
-    totalNegativeVal = int((yVal == 0).sum().item())
-    totalNegativeTest = int((yTest == 0).sum().item())
+    for _, y in testDataLoader:
+        y = y.detach().cpu()
+        totalPositiveTest += int((y == 1).sum().item())
+        totalNegativeTest += int((y == 0).sum().item())  
 
     totalPositive = totalPositiveTrain + totalPositiveVal + totalPositiveTest
 
