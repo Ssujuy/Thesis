@@ -2,7 +2,6 @@ import argparse
 import csv
 from Bio import SeqIO
 from pathlib import Path
-from computationalFeatures import firstORFLength
 import Types
 
 def fastaToList(path: str) -> list:

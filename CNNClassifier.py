@@ -36,7 +36,7 @@ class SmORFCNN(nn.Module):
     embeddingsInputChannels : int
         Size of dnabert6 embeddings.
 
-    featuresPath: str
+    trainPath: str
         Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
         for valid=1, padded=0 positions and dnabert6 embeddings
 
@@ -246,7 +246,7 @@ class SmORFCNN(nn.Module):
         embeddingsInputChannels : int
             Size of dnabert6 embeddings.
 
-        featuresPath: str
+        trainPath: str
             Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
             for valid=1, padded=0 positions and dnabert6 embeddings
 
@@ -350,7 +350,7 @@ class SmORFCNN(nn.Module):
         self.seed = seed
         self.deterministic = deterministic
         self.device = device
-        self.featuresPath = featuresPath
+        self.trainPath = trainPath
 
         self._initializeEnvironment()
 
@@ -493,13 +493,13 @@ class SmORFCNN(nn.Module):
         if config["embeddingsInputChannels"] is None:
             raise KeyError("Key embeddingsInputChannels does not exist in the configuration file.")
 
-        if config["featuresPath"] is None:
-            raise KeyError("Key featuresPath does not exist in the configuration file.")       
+        if config["trainPath"] is None:
+            raise KeyError("Key trainPath does not exist in the configuration file.")       
 
         return cls(
             onehotInputChannels         = config["onehotInputChannels"],
             embeddingsInputChannels     = config["embeddingsInputChannels"],
-            featuresPath                = config["featuresPath"],
+            trainPath                   = config["trainPath"],
             predictInputPath            = config["predictInputPath"],
             predictOutputPath           = config["predictOutputPath"],
             hiddenState                 = config.get("hiddenState",                   Types.HiddenState.BOTH),
@@ -553,7 +553,7 @@ class SmORFCNN(nn.Module):
             "saveModelPathDir":           self.saveModelPathDir,
             "onehotInputChannels":        self.onehotInputChannels,
             "embeddingsInputChannels":    self.embeddingsInputChannels,
-            "featuresPath":               self.featuresPath,
+            "trainPath":                  self.trainPath,
             "predictInputPath":           self.predictInputPath,
             "predictOutputPath":          self.predictOutputPath,
             "hiddenState":                self.dnabertHiddenState,
@@ -639,7 +639,7 @@ class SmORFCNN(nn.Module):
         Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
         Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
         """
-        self.csv_path = Path(self.featuresPath)
+        self.csv_path = Path(self.trainPath)
         dataFrame = pd.read_csv(self.csv_path)
 
         self.trainDataLoader, self.validationDataLoader, self.testDataLoader = Helpers.toDataloaders(
@@ -923,9 +923,9 @@ class SmORFCNN(nn.Module):
 
             sequences, y = batch
 
-            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence) for sequence in sequences], dim=0)
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence) for sequence in sequences], dim=0).to(torch.float32)
             xOnehot = xOnehot.permute(0, 2, 1).contiguous()
-            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32) 
+            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32)
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
             xEmbed = torch.from_numpy(xEmbed).contiguous().to(torch.float32)
@@ -999,9 +999,9 @@ class SmORFCNN(nn.Module):
 
             sequences, y = batch
 
-            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence) for sequence in sequences], dim=0)
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence) for sequence in sequences], dim=0).to(torch.float32)
             xOnehot = xOnehot.permute(0, 2, 1).contiguous()
-            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32) 
+            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32)
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
             xEmbed = torch.from_numpy(xEmbed).contiguous().to(torch.float32)
@@ -1248,15 +1248,15 @@ class SmORFCNN(nn.Module):
 
         for sequence in sequences:
 
-            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence)], dim=0)
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence)], dim=0).to(torch.float32)
             xOnehot = xOnehot.permute(0, 2, 1).contiguous()
 
-            maskOneHot = (xOnehot.sum(dim=1) > 0).to(torch.float32)
+            maskOnehot = (xOnehot.sum(dim=1, keepdim=True) > 0).to(torch.float32)
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
             xEmbed = torch.from_numpy(xEmbed).contiguous().to(torch.float32)
 
-            outputs = self(xOnehot, xEmbed, maskOneHot)
+            outputs = self(xOnehot, xEmbed, maskOnehot)
             probs = torch.sigmoid(outputs)
             preds = (probs >= self.threshold).to(torch.int8)
 
@@ -1382,7 +1382,7 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,1536,"train.csv",debug=False)
+mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=False)
 # mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
 mymodel.initializeDataset()
 mymodel.fit(10)
