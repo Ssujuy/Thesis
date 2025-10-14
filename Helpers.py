@@ -17,141 +17,10 @@ sequenceMapping = {
     "T": torch.tensor([1,0,0,0], dtype=torch.float32)
 }
 
-########## ----------- PyTorch File Helper Functions --------- ##########
-
-
-def saveFeaturesPtFile(
-        saveFeaturesPath: str,
-        sequences: list,
-        onehot: torch.tensor,
-        embeddings: torch.tensor,
-        labels: torch.tensor,
-        metadata: dict
-) -> None:
-
-    """
-    Function that takes args sequences, onehot, embeddings, labels and metadata
-    and saves them to PyTorch file, for training of smORF CNN classifier.
-
-    Parameters
-    ----------
-    saveFeaturesPath : str
-        Path to save the pyTorch file.
-    
-    sequences : list
-        List of DNA sequences as str.
-    
-    onehot : tensor
-        Pytorch tensor containing DNA sequences as onehot encoded.
-    
-    embeddings : tensor
-        Embeddings for each sequence, taken from DNABERT6.
-    
-    labels : tensor
-        Label for each sequence (0,1).
-    """
-
-    payload = {
-        "sequences": sequences,
-        "onehot": onehot,
-        "embeddings": embeddings,
-        "labels": labels,
-        "metadata": metadata,
-    }
-    saveFeaturesPath = Path(saveFeaturesPath)
-    torch.save(payload, saveFeaturesPath)
-
-    print(f"✓ Saved {len(sequences)} samples to {saveFeaturesPath.resolve()}")
-    print(f"   onehot:      {tuple(onehot.shape)}")
-    print(f"   embeddings:  {tuple(embeddings.shape)}")
-    print(f"   labels:      {tuple(labels.shape)}")
-
-
-def printPt(
-        saveFeaturesPath: str,
-        rows: int = Types.DEFAULT_PT_ROWS_PRINT,
-        dim: int = Types.DEFAULT_PT_LENGTH_PRINT
-    ) -> None:
-
-    """
-    Prints a features pyTorch file's first 6 (default) rows with max length 10.
-
-    Parameters
-    ----------
-    saveFeaturesPathstr : str
-        File path of pyTorch file.
-
-    rows : int
-        Number of rows to print.
-
-    dim : int
-        Size of print per item.
-    """
-
-    saveFeaturesPath = Path(saveFeaturesPath)
-    ptFile = torch.load(saveFeaturesPath, map_location="cpu")
-
-    print(f"Printing first {rows} rows of {saveFeaturesPath.resolve()} for sanity check.")
-
-    oh = ptFile["onehot"][:rows, :dim, :].to(torch.int8).cpu().tolist()
-    emb = ptFile["embeddings"][:rows, :dim].cpu().numpy().tolist()
-
-    df = pd.DataFrame({
-        "sequence": ptFile["sequences"][:rows],
-        "label": ptFile["labels"][:rows].tolist(),
-        "onehot": oh,
-        "embeddings": emb
-    })
-
-    print(df)
-
-########## ----------- End --------- ##########
-
 ########## ----------- Dataset Helper Functions --------- ##########
-
-
-def loadFeaturesFromPt(path: str) -> TensorDataset:
-
-    """
-    Function to load a pyTorch file and return a TensorDataset.
-    (x_onehot [N,4,L], mask_onehot [N,L], x_embed [N,D,1], y [N])
-    keys in pyTorch file: {"embeddings", "onehot", "labels"}
-
-    Parameters
-    ----------
-    path : str
-        Path to the pyTorch file.
-    
-    Return
-    ----------
-    TensorDataset
-        From loader from pyTorch file.
-    """
-
-    features = torch.load(Path(path), map_location="cpu")
-
-    if features["embeddings"] == None and features["onehot"] == None:
-        raise ValueError(f"Pytorch file {path} does not contain key 'onehot' and embeddings")
-
-    onehot = torch.as_tensor(features["onehot"], dtype=torch.float32)   # [N,L,4]
-    xOnehot = onehot.permute(0, 2, 1).contiguous()              # [N,4,L]
-    maskOnehot = (onehot.sum(dim=-1) > 0).to(torch.float32)     # [N,L]
-
-    # --- embeddings: numpy [N,D] -> tensor [N,D,1], mask = ones ---
-    xEmbed = torch.as_tensor(features["embeddings"], dtype=torch.float32).unsqueeze(-1)
-
-
-    if features["labels"] != None:
-        y = torch.as_tensor(features["labels"], dtype=torch.long)           # [N]
-    
-    else:
-        raise ValueError(f"Pytorch file {path} does not contain key 'labels'")
-
-    return TensorDataset(xOnehot, maskOnehot, xEmbed, y)
 
 def toDataloaders(
         dataFrame: pd.core.frame.DataFrame,
-        trainSplit: float,
         validationSplit: float,
         testSplit: float,
         trainBatchSize: int,
@@ -162,6 +31,7 @@ def toDataloaders(
 
     """
     Function that takes a DataFrame (sequence and label columns) as argument,\n
+    Calculates onehot encoded sequences and masks for onehot, combines all together and\n
     shuffles the dataset then splits it into training, validation and testing DataLoaders.
 
     Parameters
@@ -203,21 +73,30 @@ def toDataloaders(
         dataFrame,
         test_size=testSplit,
         random_state=seed,
-        stratify=dataFrame["label"]
+        stratify=dataFrame["label"],
     )
 
     validationSplit = validationSplit / (1 - testSplit)
-
     trainDataFrame, validationDataFrame = train_test_split(
         tempDataFrame,
         test_size=validationSplit,
         random_state=seed,
-        stratify=tempDataFrame["label"]
+        stratify=tempDataFrame["label"],
     )
 
-    trainData = list(zip(trainDataFrame["sequence"].tolist(), trainDataFrame["label"].tolist()))
-    validationData = list(zip(validationDataFrame["sequence"].tolist(), validationDataFrame["label"].tolist()))
-    testData = list(zip(testDataFrame["sequence"].tolist(), testDataFrame["label"].tolist()))
+    def build_items(df):
+        items = []
+        for seq, lbl in zip(df["sequence"].tolist(), df["label"].tolist()):
+            x = sequenceTo1Hot(seq).to(torch.float32)
+            x = x.permute(1, 0).contiguous()
+            mask = (x.sum(dim=0) > 0).to(torch.float32)
+            y = torch.tensor(lbl, dtype=torch.long)
+            items.append((x, mask, seq, y))
+        return items
+
+    trainData = build_items(trainDataFrame)
+    validationData = build_items(validationDataFrame)
+    testData = build_items(testDataFrame)
 
     train = DataLoader(
         trainData,
@@ -225,30 +104,28 @@ def toDataloaders(
         shuffle=True,
         num_workers=0,
         pin_memory=False,
-        drop_last=False
+        drop_last=False,
     )
-
     validation = DataLoader(
         validationData,
         batch_size=valBatchSize,
         shuffle=False,
         num_workers=0,
-        pin_memory=False
+        pin_memory=False,
     )
-
     test = DataLoader(
         testData,
         batch_size=testBatchSize,
         shuffle=False,
         num_workers=0,
-        pin_memory=False
+        pin_memory=False,
     )
 
     return train, validation, test
 
 def printDataloader(name: str, data: DataLoader) -> None:
     """
-    Prints DataLoader's name, number of batches, samples and shapes.
+    Prints DataLoader's name, number of batches, samples and shapes from onehot encoded and mask onehot.
 
     Parameters
     ----------
@@ -261,23 +138,27 @@ def printDataloader(name: str, data: DataLoader) -> None:
     batches = len(data)
     samples = len(data.dataset)
 
-    sequences, y = next(iter(data))
+    onehot, maskonehot, sequences, y = next(iter(data))
 
     print(f"Print 3 rows for {name} DataLoader")
     print(f"  - Number of batches: {batches}")
     print(f"  - Number of samples: {samples}")
+    print(f"  - Onehot encoded sequences shape: {onehot.shape}")
+    print(f"  - Mask for onehot encoded sequences shape: {maskonehot.shape}")
     print(f"  - Sequences batch size: {len(sequences)}")
     print(f"  - Labels shape: {len(y)}")
 
     try:
         batch = next(iter(data))
-        sequence, y = batch
+        onehot, maskonehot, sequence, y = batch
 
         table = []
 
         for i in range(3):
             
             table.append({
+                "onehot": onehot[i, :, :10].flatten().tolist()[:10],
+                "mask": maskonehot[i].flatten().tolist()[:10],
                 "index": i,
                 "sequences": sequence[i],
                 "labels": y[i]
@@ -577,7 +458,7 @@ def computeEpochROC(
     Returns
     ----------
     dict
-        {"auc"}.
+        {"auc", "tpr", "fpr"}.
     """
 
     probabilities = probabilities.detach().view(-1).cpu().numpy().astype(np.float64)
@@ -598,7 +479,7 @@ def computeEpochROC(
     truePositiveRatio = np.concatenate([[0.0], truePositiveRatio, [1.0]])
     auc = float(np.trapz(truePositiveRatio, falsePositiveRatio))
     
-    aucDict = {"auc": auc}
+    aucDict = {"auc": auc, "fpr": falsePositiveRatio, "tpr": truePositiveRatio}
 
     printEpochAUC(aucDict, epochIndex)
 
@@ -668,7 +549,7 @@ def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
 
 def printEpochAUC(auc: dict, epochIndex: int) -> None:
     """
-    Prints epoch AUC,False Positive Ratio and False Negative Ratio as DataFrame.
+    Prints epoch AUC.
 
     Parameters
     ----------
@@ -679,9 +560,8 @@ def printEpochAUC(auc: dict, epochIndex: int) -> None:
         Current epoch.
     """
 
-    df = pd.DataFrame(auc)
-    print(f"Epoch {epochIndex} AUC , False Positive Ratio and False Negative Ratio")
-    print(df)
+    auc = {k: v for k, v in auc.items() if k not in ("fpr", "tpr")}
+    print(f"Epoch {epochIndex} AUC: {auc["auc"]}")
 
 def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
     """
@@ -700,6 +580,8 @@ def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
 
     tMetricsDf.insert(0, "epoch", np.arange(1, len(tMetricsDf) + 1, dtype=int))
     vMetricsDf.insert(0, "epoch", np.arange(1, len(vMetricsDf) + 1, dtype=int))
+
+    vMetricsDf = vMetricsDf.drop(columns=["fpr", "tpr"], errors="ignore")
 
     print("Summary of Metrics computed during Fit")
     print(tMetricsDf.to_string(index=False))
@@ -761,17 +643,17 @@ def plotLabelDistribution(
     totalPositiveTrain = totalPositiveVal = totalPositiveTest = 0
     totalNegativeTrain = totalNegativeVal = totalNegativeTest = 0
 
-    for _, y in trainDataLoader:
+    for _, _, _, y in trainDataLoader:
         y = y.detach().cpu()
         totalPositiveTrain += int((y == 1).sum().item())
         totalNegativeTrain += int((y == 0).sum().item())
     
-    for _, y in validationDataLoader:
+    for _, _, _, y in validationDataLoader:
         y = y.detach().cpu()
         totalPositiveVal += int((y == 1).sum().item())
         totalNegativeVal += int((y == 0).sum().item())    
 
-    for _, y in testDataLoader:
+    for _, _, _, y in testDataLoader:
         y = y.detach().cpu()
         totalPositiveTest += int((y == 1).sum().item())
         totalNegativeTest += int((y == 0).sum().item())  
@@ -961,7 +843,6 @@ def plotMeanROC(
     aucMean = float(summary.get("aucMean", np.nanmean(aucs)))
     aucStd  = float(summary.get("aucStd",  np.nanstd(aucs)))
 
-
     fig = plt.figure()
     plt.plot(grid, meanTpr, label=f"mean AUC = {aucMean:.3f} ± {aucStd:.3f}")
     lower = np.clip(meanTpr - stdTpr, 0.0, 1.0)
@@ -974,5 +855,3 @@ def plotMeanROC(
     plt.show()
 
     return fig
-
-########## ----------- End --------- ##########

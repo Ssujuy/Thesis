@@ -263,7 +263,7 @@ class DNABERT6:
             self.tokenizer.save_pretrained(self.saveDirectory)
             print(f"✓ Fine-tuned model saved to  {Path(self.saveDirectory).resolve()}")
 
-    def embeddings(self, sequences) -> np.array:
+    def embeddings(self, sequences) -> torch.Tensor:
         
         """
         Return an (N, D) NumPy matrix of embeddings. Default size
@@ -273,7 +273,7 @@ class DNABERT6:
         self.model.eval()
         self.model.to(self.device)
 
-        vecs = np.empty((len(sequences), self.projectionDimension), dtype=np.float32)
+        out = torch.empty((len(sequences), self.projectionDimension), device=self.device, dtype=torch.float16)
         idx = 0
 
         with torch.no_grad():
@@ -299,10 +299,11 @@ class DNABERT6:
                 hidden = self.model.base_model(input_ids=toks["input_ids"], attention_mask=attentionMask).last_hidden_state
                 pooled = self._poolHidden(hidden, attentionMask, self.hiddenState, specialTokensMask)
 
-                vecs[idx : idx + pooled.size(0)] = pooled.cpu().numpy()
-                idx += pooled.size(0)
+                bsz = pooled.size(0)
+                out[idx : idx + bsz] = pooled.to(dtype=torch.float16)
+                idx += bsz
 
-        return vecs
+        return out
 
     def load(self, modelPath: str) -> None:
         """
