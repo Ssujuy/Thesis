@@ -6,11 +6,14 @@ import torch.optim.lr_scheduler as lrScheduler
 from torch.utils.data import DataLoader, ConcatDataset, Subset
 from sklearn.model_selection import StratifiedKFold
 from pathlib import Path
+import pandas as pd
 
 import Types, Helpers
+from dataRead import fastaToList
 from MultiKernelConvolution import MultiKernelConvolution
 from MultiGapKernelConvolution import MultiGapKernelConvolution
 from TemporalHead import TemporalHead
+from dnabert6 import DNABERT6
 
 # ---------------------------------------------
 # The CNNClassifier for smORFs
@@ -33,7 +36,7 @@ class SmORFCNN(nn.Module):
     embeddingsInputChannels : int
         Size of dnabert6 embeddings.
 
-    featuresPath: str
+    trainPath: str
         Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
         for valid=1, padded=0 positions and dnabert6 embeddings
 
@@ -192,7 +195,11 @@ class SmORFCNN(nn.Module):
         self,
         onehotInputChannels: int,
         embeddingsInputChannels: int,
-        featuresPath: str,
+        trainPath: str,
+        predictInputPath: str,
+        predictOutputPath: str,
+        hiddenState: str                        = Types.HiddenState.BOTH,
+        dnabertDirectory: str                   = Types.DEFAULT_DNABER6_SAVE_DIRECTORY,
         saveModelPathDir: str                   = Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         multiGapKernel: bool                    = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL,
@@ -239,7 +246,7 @@ class SmORFCNN(nn.Module):
         embeddingsInputChannels : int
             Size of dnabert6 embeddings.
 
-        featuresPath: str
+        trainPath: str
             Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
             for valid=1, padded=0 positions and dnabert6 embeddings
 
@@ -343,7 +350,7 @@ class SmORFCNN(nn.Module):
         self.seed = seed
         self.deterministic = deterministic
         self.device = device
-        self.featuresPath = featuresPath
+        self.trainPath = trainPath
 
         self._initializeEnvironment()
 
@@ -353,6 +360,12 @@ class SmORFCNN(nn.Module):
 
         self.onehotInputChannels = onehotInputChannels
         self.embeddingsInputChannels =  embeddingsInputChannels
+
+        self.dnabertDirectory = dnabertDirectory
+        self.dnabertHiddenState = hiddenState
+
+        self.predictInputPath = predictInputPath
+        self.predictOutputPath = predictOutputPath
 
         self.multiKernel = multiKernel
         self.multiGapKernel = multiGapKernel
@@ -385,10 +398,15 @@ class SmORFCNN(nn.Module):
         self.testSplit = testSplit
         self.epochs = epochs
 
+        self.dnabert6Class = None
         self.multiKernelClass = None
         self.multiKernelTemporalClass = None
         self.multiGapKernelClass = None
         self.multiGapKernelTemporalClass = None
+
+        if self.dnabertEmbeddings:
+            self.dnabert6Class = DNABERT6(hiddenState=self.dnabertHiddenState)
+            self.dnabert6Class.load(self.dnabertDirectory)
 
         if self.multiKernel:
             self.multiKernelClass = MultiKernelConvolution(
@@ -432,6 +450,7 @@ class SmORFCNN(nn.Module):
         )
 
         self.optimizer = self._optimizerInit()
+        self.scheduler = self._schedulerInit()
 
         self.modelParams = sum(p.numel() for p in self.parameters())
         self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -475,13 +494,28 @@ class SmORFCNN(nn.Module):
         if config["embeddingsInputChannels"] is None:
             raise KeyError("Key embeddingsInputChannels does not exist in the configuration file.")
 
-        if config["featuresPath"] is None:
-            raise KeyError("Key featuresPath does not exist in the configuration file.")       
+        if config["trainPath"] is None:
+            raise KeyError("Key trainPath does not exist in the configuration file.")       
+
+        hiddenState = config.get("hiddenState", Types.HiddenState.BOTH)
+
+        if hiddenState == "cls":
+            hiddenState = Types.HiddenState.CLS
+
+        elif hiddenState == "mean":
+            hiddenState = Types.HiddenState.MEAN
+
+        elif hiddenState == "both":
+            hiddenState = Types.HiddenState.BOTH
 
         return cls(
             onehotInputChannels         = config["onehotInputChannels"],
             embeddingsInputChannels     = config["embeddingsInputChannels"],
-            featuresPath                = config["featuresPath"],
+            trainPath                   = config["trainPath"],
+            predictInputPath            = config["predictInputPath"],
+            predictOutputPath           = config["predictOutputPath"],
+            hiddenState                 = hiddenState,
+            dnabertDirectory            = config.get("dnabertDirectory",              Types.DEFAULT_DNABER6_SAVE_DIRECTORY),
             saveModelPathDir            = config.get("saveModelPathDir",              Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH),
             multiKernel                 = config.get("multiKernel",                   Types.DEFAULT_SMORFCNN_MULTI_KERNEL),
             multiGapKernel              = config.get("multiGapKernel",                Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL),
@@ -527,11 +561,26 @@ class SmORFCNN(nn.Module):
             model's attributes in dictionary.
         """
 
+        hiddenState = ""
+
+        if self.dnabertHiddenState == Types.HiddenState.CLS:
+            hiddenState = "cls"
+
+        elif self.dnabertHiddenState == Types.HiddenState.MEAN:
+            hiddenState = "mean"
+
+        elif self.dnabertHiddenState == Types.HiddenState.BOTH:
+            hiddenState = "both"
+
         config = {
             "saveModelPathDir":           self.saveModelPathDir,
             "onehotInputChannels":        self.onehotInputChannels,
             "embeddingsInputChannels":    self.embeddingsInputChannels,
-            "featuresPath":               self.featuresPath,
+            "trainPath":                  self.trainPath,
+            "predictInputPath":           self.predictInputPath,
+            "predictOutputPath":          self.predictOutputPath,
+            "hiddenState":                hiddenState,
+            "dnabertDirectory":           self.dnabertDirectory,
             "multiKernel":                self.multiKernel,
             "multiGapKernel":             self.multiGapKernel,
             "dnabertEmbeddings":          self.dnabertEmbeddings,
@@ -599,13 +648,13 @@ class SmORFCNN(nn.Module):
             torch.cuda.manual_seed(self.seed)
             torch.cuda.manual_seed_all(self.seed)
 
-        if self.deterministic:
-            try:
-                torch.use_deterministic_algorithms(True)
-            except Exception:
-                pass
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
+        # if self.deterministic:
+        #     try:
+        #         torch.use_deterministic_algorithms(True)
+        #     except Exception:
+        #         pass
+        #     torch.backends.cudnn.deterministic = True
+        #     torch.backends.cudnn.benchmark = False
 
     def initializeDataset(self) -> None:
         """
@@ -613,11 +662,14 @@ class SmORFCNN(nn.Module):
         Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
         Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
         """
-        tensorDataset = Helpers.loadFeaturesFromPt(self.featuresPath)
+
+        print(f"Initiallizing dataset for model training from csv in path: {self.trainPath}")
+
+        self.csv_path = Path(self.trainPath)
+        dataFrame = pd.read_csv(self.csv_path)
 
         self.trainDataLoader, self.validationDataLoader, self.testDataLoader = Helpers.toDataloaders(
-            tensorDataset,
-            self.trainSplit,
+            dataFrame,
             self.validationSplit,
             self.testSplit,
             self.trainBatchSize,
@@ -684,21 +736,42 @@ class SmORFCNN(nn.Module):
 
     def _schedulerInit(self) -> torch.optim.lr_scheduler:
         """
-        Initializes sequential Learning rate schedulers, with warmpup LinearLR and cosine CosineAnnealingLR.
+        Initializes sequential Learning rate scheduler, with warmpup LinearLR and cosine CosineAnnealingLR.\n
+
+        Return
+        ----------
+        torch.optim.lr_scheduler
+            Sequential Learning Rate scheduler.
         """
-        if self.trainDataLoader is None:
-            AttributeError("Traindataloader must be initialized to calculate size")
 
-        stepsPerEpoch = len(self.trainDataLoader)
-        totalSteps = stepsPerEpoch * self.epochs
-        warmupSteps = int(self.schedulerWarmpup * totalSteps)
-        cosineSteps = totalSteps - warmupSteps
+        warmupEpochs  = int(round(self.schedulerWarmpup * self.epochs))
+        cosineEpochs  = self.epochs - warmupEpochs
 
-        warmup = lrScheduler.LinearLR(self.optimizer, start_factor=self.schedulerFactor, total_iters=warmupSteps)
+        schedulers = []
+        milestones = []
 
-        cosine = lrScheduler.CosineAnnealingLR(self.optimizer, T_max=cosineSteps, eta_min=self.minLearningRate)
+        warmup = lrScheduler.LinearLR(
+            self.optimizer,
+            start_factor=self.schedulerFactor,
+            total_iters=warmupEpochs
+        )
 
-        return lrScheduler.SequentialLR(self.optimizer, schedulers=[warmup, cosine], milestones=[warmupSteps])    
+        schedulers.append(warmup)
+        milestones.append(warmupEpochs)
+
+        cosine = lrScheduler.CosineAnnealingLR(
+            self.optimizer,
+            T_max=cosineEpochs,
+            eta_min=self.minLearningRate
+        )
+
+        schedulers.append(cosine)
+
+        return lrScheduler.SequentialLR(
+            self.optimizer,
+            schedulers=schedulers,
+            milestones=milestones
+        )
 
     def forward(self, xOnehot: torch.Tensor, xEmbeddings:  torch.Tensor, maskOnehot: torch.Tensor) -> torch.Tensor:
         """
@@ -808,7 +881,10 @@ class SmORFCNN(nn.Module):
             iterator = enumerate(self.trainDataLoader)
 
         for i, batch in iterator:
-            xOnehot, maskOnehot, xEmbed, y = batch
+
+            xOnehot, maskOnehot, sequences, y = batch
+
+            xEmbed = self.dnabert6Class.embeddings(sequences)
 
             self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Training", i, epochIndex)
 
@@ -831,7 +907,6 @@ class SmORFCNN(nn.Module):
             torch.nn.utils.clip_grad_norm_(self.parameters(), self.maxGradNorm)
 
             self.optimizer.step()
-            self.scheduler.step()
             batchSize = y.size(0)
             n += batchSize
             runningLoss += loss.item() * batchSize
@@ -886,7 +961,9 @@ class SmORFCNN(nn.Module):
 
         for j, batch in iterator:
 
-            xOnehot, maskOnehot, xEmbed, y = batch
+            xOnehot, maskOnehot, sequences, y = batch
+
+            xEmbed = self.dnabert6Class.embeddings(sequences)
 
             self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Validation", j, epochIndex)
 
@@ -955,7 +1032,9 @@ class SmORFCNN(nn.Module):
 
         for k, batch in iterator:
 
-            xOnehot, maskOnehot, xEmbed, y = batch
+            xOnehot, maskOnehot, sequences, y = batch
+
+            xEmbed = self.dnabert6Class.embeddings(sequences)
 
             self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Testing", k, 1)
 
@@ -1003,8 +1082,6 @@ class SmORFCNN(nn.Module):
             Current epoch number.
         """
         self.to(self.device)
-
-        self.scheduler = self._schedulerInit()
 
         bestF1 = -1.0
         bestEpoch = 0
@@ -1061,6 +1138,7 @@ class SmORFCNN(nn.Module):
             validationMetrics["learningRate"].append(epochLR)
             print(f"[Scheduler] epoch={epoch} val_loss={epochValMetrics["loss"]:.6f} lr={epochLR:.3e}")
 
+            self.scheduler.step()
 
             if validationMetrics["f1"][epoch - 1] > bestF1:
                 bestF1 = validationMetrics["f1"][epoch - 1]
@@ -1176,6 +1254,7 @@ class SmORFCNN(nn.Module):
             self.load_state_dict(bestFoldState)
             self.to(self.device)
             print(f"\nRestored best fold #{bestFold} (val F1={bestFoldF1:.4f})")
+            self.saveModel()
 
         self.trainDataLoader = originalTrainDataLoader
         self.validationDataLoader = originalValidationDataLoader
@@ -1187,6 +1266,53 @@ class SmORFCNN(nn.Module):
         Helpers.plotMeanROC(foldMetrics, summary)
 
         return foldMetrics, summary
+
+    @torch.no_grad()
+    def predict(self):
+        """
+        """
+        
+        self.eval()
+        results = []
+        sequences = fastaToList(self.predictInputPath)
+
+        print(f"Predicting coding vs non-coding small open readind frames, from fasta file: {self.predictInputPath}")
+
+        for sequence in sequences:
+
+            xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence)], dim=0).to(torch.float32)
+            xOnehot = xOnehot.permute(0, 2, 1).contiguous()
+            maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32)
+
+            xEmbed = self.dnabert6Class.embeddings([sequence])
+
+            xOnehot = xOnehot.to(self.device)
+            maskOnehot = maskOnehot.to(self.device)
+            xEmbed = xEmbed.to(self.device)
+
+            outputs = self(xOnehot, xEmbed, maskOnehot)
+            probs = torch.sigmoid(outputs)
+            preds = (probs >= self.threshold).to(torch.int8)
+
+            for p, pred, s in zip(probs.tolist(), preds.tolist(), sequences):
+                results.append({
+                    "sequence": s,
+                    "probabillity": float(p),
+                    "label": int(pred)
+                })
+
+
+        print(f"Saving predictions to {self.predictOutputPath}")
+        df = pd.DataFrame(results)
+        df.to_csv(self.predictOutputPath, index=False)
+
+        counts = df["label"].value_counts().reindex([0, 1], fill_value=0)
+        total = len(df)
+        perc = (counts / total * 100).round(2)
+
+        print(f"Total predictions: {total}")
+        print(f"Non Coding sequences: {counts[0]} ({perc[0]}%)")
+        print(f"Coding sequences: {counts[1]} ({perc[1]}%)")
 
     def saveModel(self) -> None:
         """
@@ -1214,7 +1340,7 @@ class SmORFCNN(nn.Module):
     @classmethod
     def load(cls, path: str) -> "SmORFCNN":
         """
-        Load model (architecture + weights) from path, then return the initialized model.
+        Load model (architecture + weights) from directory path, then return the initialized model.
 
         Parameters
         ----------
@@ -1230,7 +1356,7 @@ class SmORFCNN(nn.Module):
             SmORFCNN class model, loaded from pyTorch file and JSOn configuration file.
         """
 
-        path = Path(f"{path}/{path}.pt")
+        path = Path(path)
 
         savedModel = torch.load(path, map_location="cpu")
         model = cls.fromJson(savedModel["configPath"])
@@ -1300,7 +1426,8 @@ class SmORFCNN(nn.Module):
             print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
             f"loss_avg={runningLoss/max(1,n):.6f}")
 
-# mymodel = SmORFCNN(4,1536,"features.pt",debug=False)
+#mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=False)
 mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
-mymodel.initializeDataset()
-mymodel.fit(1)
+#mymodel.initializeDataset()
+# mymodel.fit(10)
+mymodel.predict()
