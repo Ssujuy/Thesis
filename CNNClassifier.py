@@ -630,7 +630,7 @@ class SmORFCNN(nn.Module):
         with open(path, "w", encoding="utf-8") as file:
             json.dump(config, file, indent=2, sort_keys=True)
 
-        print(f"Configuration saved to: {path.resolve()}")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Configuration saved to: {path.resolve()}")
 
     def _initializeEnvironment(self) -> None:
         """
@@ -663,7 +663,7 @@ class SmORFCNN(nn.Module):
         Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
         """
 
-        print(f"Initiallizing dataset for model training from csv in path: {self.trainPath}")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Initiallizing dataset for model training from csv in path: {self.trainPath}")
 
         self.csv_path = Path(self.trainPath)
         dataFrame = pd.read_csv(self.csv_path)
@@ -868,7 +868,7 @@ class SmORFCNN(nn.Module):
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
 
-        print(f"Starting training for epoch {epochIndex}")
+        Helpers.colourPrint(Types.Colours.WHITE, f"Starting training for epoch {epochIndex}")
 
         try:
             iterator = tqdm(
@@ -950,7 +950,7 @@ class SmORFCNN(nn.Module):
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
 
-        print(f"Starting validation for epoch {epochIndex}")
+        Helpers.colourPrint(Types.Colours.WHITE, f"Starting validation for epoch {epochIndex}")
 
         iterator = tqdm(
                 enumerate(self.validationDataLoader),
@@ -1021,7 +1021,7 @@ class SmORFCNN(nn.Module):
 
         lossFunction = torch.nn.BCEWithLogitsLoss()
 
-        print(f"Starting testing")
+        Helpers.colourPrint(Types.Colours.WHITE, f"Starting testing")
 
         iterator = tqdm(
                 enumerate(self.testDataLoader),
@@ -1136,7 +1136,8 @@ class SmORFCNN(nn.Module):
 
             epochLR = self.optimizer.param_groups[0]["lr"]
             validationMetrics["learningRate"].append(epochLR)
-            print(f"[Scheduler] epoch={epoch} val_loss={epochValMetrics["loss"]:.6f} lr={epochLR:.3e}")
+
+            Helpers.colourPrint(Types.Colours.BLUE, f"[Scheduler] epoch={epoch} val_loss={epochValMetrics["loss"]:.6f} lr={epochLR:.3e}")
 
             self.scheduler.step()
 
@@ -1204,7 +1205,7 @@ class SmORFCNN(nn.Module):
 
         for foldIndex, (trainIndex, valIndex) in iterator:
 
-            print(f"\n=== Fold {foldIndex}/{k}: train={len(trainIndex)}  val={len(valIndex)} ===")
+            Helpers.colourPrint(Types.Colours.WHITE, f"\n=== Fold {foldIndex}/{k}: train={len(trainIndex)}  val={len(valIndex)} ===")
 
             torch.manual_seed(self.seed + foldIndex)
             np.random.seed(self.seed + foldIndex)
@@ -1253,7 +1254,7 @@ class SmORFCNN(nn.Module):
         if bestFoldState is not None:
             self.load_state_dict(bestFoldState)
             self.to(self.device)
-            print(f"\nRestored best fold #{bestFold} (val F1={bestFoldF1:.4f})")
+            Helpers.colourPrint(Types.Colours.RED, f"\nRestored best fold #{bestFold} (val F1={bestFoldF1:.4f})")
             self.saveModel()
 
         self.trainDataLoader = originalTrainDataLoader
@@ -1276,7 +1277,7 @@ class SmORFCNN(nn.Module):
         results = []
         sequences = fastaToList(self.predictInputPath)
 
-        print(f"Predicting coding vs non-coding small open readind frames, from fasta file: {self.predictInputPath}")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Predicting coding vs non-coding small open readind frames, from fasta file: {self.predictInputPath}")
 
         for sequence in sequences:
 
@@ -1302,7 +1303,7 @@ class SmORFCNN(nn.Module):
                 })
 
 
-        print(f"Saving predictions to {self.predictOutputPath}")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Saving predictions to {self.predictOutputPath}")
         df = pd.DataFrame(results)
         df.to_csv(self.predictOutputPath, index=False)
 
@@ -1310,9 +1311,9 @@ class SmORFCNN(nn.Module):
         total = len(df)
         perc = (counts / total * 100).round(2)
 
-        print(f"Total predictions: {total}")
-        print(f"Non Coding sequences: {counts[0]} ({perc[0]}%)")
-        print(f"Coding sequences: {counts[1]} ({perc[1]}%)")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Total predictions: {total}")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Non Coding sequences: {counts[0]} ({perc[0]}%)")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Coding sequences: {counts[1]} ({perc[1]}%)")
 
     def saveModel(self) -> None:
         """
@@ -1335,7 +1336,7 @@ class SmORFCNN(nn.Module):
         }
 
         torch.save(checkpoint, str(path))
-        print(f"Trained CNN smORF Classifier successfully saved to: {path.resolve()}")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Trained CNN smORF Classifier successfully saved to: {path.resolve()}")
 
     @classmethod
     def load(cls, path: str) -> "SmORFCNN":
@@ -1365,7 +1366,7 @@ class SmORFCNN(nn.Module):
         model.to(model.device)
         model.eval()
 
-        print(f"Trained CNN smORF Classifier successfully loaded from: {path.resolve()}")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Trained CNN smORF Classifier successfully loaded from: {path.resolve()}")
         return model
 
     def _debugInit(self):

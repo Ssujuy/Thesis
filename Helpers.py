@@ -140,13 +140,13 @@ def printDataloader(name: str, data: DataLoader) -> None:
 
     onehot, maskonehot, sequences, y = next(iter(data))
 
-    print(f"Print 3 rows for {name} DataLoader")
-    print(f"  - Number of batches: {batches}")
-    print(f"  - Number of samples: {samples}")
-    print(f"  - Onehot encoded sequences shape: {onehot.shape}")
-    print(f"  - Mask for onehot encoded sequences shape: {maskonehot.shape}")
-    print(f"  - Sequences batch size: {len(sequences)}")
-    print(f"  - Labels shape: {len(y)}")
+    Helpers.colourPrint(Types.Colours.PURPLE, f"Print stats for {name} DataLoader and 3 rows")
+    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Number of batches: {batches}")
+    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Number of samples: {samples}")
+    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Onehot encoded sequences shape: {onehot.shape}")
+    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Mask for onehot encoded sequences shape: {maskonehot.shape}")
+    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Sequences batch size: {len(sequences)}")
+    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Labels shape: {len(y)}")
 
     try:
         batch = next(iter(data))
@@ -855,3 +855,28 @@ def plotMeanROC(
     plt.show()
 
     return fig
+
+########## ----------- End --------- ##########
+
+def colourPrint(colour: Types.Colours, msg: str) -> None:
+
+    PRINT_BLUE = "\033[34m"
+    PRINT_GREEN = "\033[32m"
+    PRINT_RED = "\033[31m"
+    PRINT_PURPLE = "\033[95m
+    PRINT_RESET = "\033[0m"
+
+    if colour == Types.Colours.WHITE:
+        print(f"{msg}")
+
+    elif colour == Types.Colours.BLUE:
+        print(f"{PRINT_BLUE}{msg}{PRINT_RESET}")
+    
+    elif colour == Types.Colours.GREEN:
+        print(f"{PRINT_GREEN}{msg}{PRINT_RESET}")
+
+    elif colour == Types.Colours.RED:
+        print(f"{PRINT_RED}{msg}{PRINT_RESET}")
+
+    elif colour == Types.Colours.PURPLE:
+        print(f"{PRINT_PURPLE}{msg}{PRINT_RESET}")

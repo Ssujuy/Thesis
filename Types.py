@@ -2,11 +2,6 @@ from enum import Enum
 import torch
 import torch.nn as nn
 
-PRINT_BLUE = "\033[34m"
-PRINT_GREEN = "\033[32m"
-PRINT_RED = "\033[31m"
-PRINT_RESET = "\033[0m"
-
 ########## ----------- Generic Defaults --------- ##########
 DEFAULT_DEBUG_MODE:                         bool        = False
 ########## ----------- End --------- ##########
@@ -122,3 +117,11 @@ class HiddenState(Enum):
     CLS     = 0,
     MEAN    = 1,
     BOTH    = 2
+
+class Colours(Enum):
+
+    WHITE   = 0,
+    BLUE    = 1,
+    GREEN   = 2,
+    RED     = 3,
+    PURPLE  = 4
