@@ -80,21 +80,21 @@ class DNABERT6:
         self.trainer = None
         self.arguments = None
 
-        print("Initialized DNABERT-6 model for finetuning")
-        print(f"Dataset path for finetuning: {self.trainingDataPath}")
-        print(f"Dataset percentage to use: {self.trainingDatasetPercentage}%")
-        print(f"Learning rate: {self.learningRate}")
-        print(f"Window size: {self.windowSize}")
-        print(f"Weight decay: {self.weightDecay}")
-        print(f"Warmup ratio: {self.warmupRatio}")
-        print(f"Finetuning eval barch size: {self.fineTuneEvalBatchSize}")
-        print(f"Finetuning train batch size: {self.fineTuneTrainBatchSize}")
-        print(f"Embeddings batch size: {self.embeddingsBatchSize}")
-        print(f"Projection dimension: {self.projectionDimension}")
-        print(f"Hidden state: {self.hiddenState}")
-        print(f"Evaluation, logging and save stratefy: {self.strategy}")
-        print(f"Metric for best model: {self.metric}")
-        print(f"Directory to save the finetuned model: {self.saveDirectory}")
+        Helpers.colourPrint(Types.Colours.BLUE, "Initialized DNABERT-6 model")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Dataset path for finetuning: {self.trainingDataPath}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Dataset percentage to use: {self.trainingDatasetPercentage}%")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Learning rate: {self.learningRate}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Window size: {self.windowSize}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Weight decay: {self.weightDecay}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Warmup ratio: {self.warmupRatio}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Finetuning eval barch size: {self.fineTuneEvalBatchSize}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Finetuning train batch size: {self.fineTuneTrainBatchSize}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Embeddings batch size: {self.embeddingsBatchSize}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Projection dimension: {self.projectionDimension}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Hidden state: {self.hiddenState}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Evaluation, logging and save stratefy: {self.strategy}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Metric for best model: {self.metric}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Directory to save the finetuned model: {self.saveDirectory}")
 
     def datasetInit(self) -> None:
         #initialize dataset from our previously created csv file
@@ -113,8 +113,8 @@ class DNABERT6:
         self.trainDataset.set_format(type="torch")
         self.validationDataset.set_format(type="torch")
 
-        print(f"Initialized Training Dataset: {self.trainDataset.shape}")
-        print(f"Initialized Validation Dataset: {self.validationDataset.shape}")
+        Helpers.colourPrint(Types.Colours.PURPLE, f"Initialized Training Dataset: {self.trainDataset.shape}")
+        Helpers.colourPrint(Types.Colours.PURPLE, f"Initialized Validation Dataset: {self.validationDataset.shape}")
 
     def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState, specialTokensMask=None):
         """
@@ -261,7 +261,7 @@ class DNABERT6:
             self.trainer.train()
             self.trainer.save_model(self.saveDirectory)
             self.tokenizer.save_pretrained(self.saveDirectory)
-            print(f"✓ Fine-tuned model saved to  {Path(self.saveDirectory).resolve()}")
+            Helpers.colourPrint(Types.Colours.GREEN, f"DNABERT-6 fine-tuned model saved to  {Path(self.saveDirectory).resolve()}")
 
     def embeddings(self, sequences) -> torch.Tensor:
         
@@ -337,25 +337,13 @@ class DNABERT6:
         else:
             self.args = None
 
-        print("✓ Loaded everything from", path.resolve())
+        Helpers.colourPrint(Types.Colours.GREEN, f"Loaded DNABERT-6 fine-tuned model from: {path.resolve()}")
 
     def history(self) -> pd.DataFrame:
 
         history = self.trainer.state.log_history
         return pd.DataFrame(history)
-    
-    def help(self) -> None:
-
-        help(self.model)
 
     def parameters(self) -> None:
 
-        print(self.model.named_parameters())
-
-    def summary(self) -> None:
-
-        print(self.model)
-
-    def configuration(self) -> None:
-
-        print(self.model.config)
+        Helpers.colourPrint(Types.Colours.BLUE, f"{self.model.named_parameters()}")
