@@ -242,20 +242,20 @@ class TemporalHead(nn.Module):
         Prints member variables of the class and number of model parameters and trainable model parameters.
         """
 
-        print("Temporal Head Parameters:")
-        print(f" - Input Channels: {self.inputChannels}")
-        print(f" - Hidden Channels: {self.hiddenChannels}")
-        print(f" - Kernel for Residual Block: {self.kernelResidual}")
-        print(f" - Kernel for size Reduction: {self.kernelReduction}")
-        print(f" - Stride: {self.stride}")
-        print(f" - Padding: {self.padding}")
-        print(f" - Groups: {self.groups}")
-        print(f" - Activation: {self.activation}")
-        print(f" - Dropout: {self.dropout}")
-        print(f" - Change Dilation for Residual Block: {self.multipleDilation}")
-        print(f" - Number of Residual blocks: {self.residualBlocks}")
-        print(f" - Model Paramters: {self.modelParams}")
-        print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
+        Helpers.colourPrint(Types.Colours.BLUE, "Temporal Head Parameters:")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Input Channels: {self.inputChannels}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Hidden Channels: {self.hiddenChannels}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Kernel for Residual Block: {self.kernelResidual}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Kernel for size Reduction: {self.kernelReduction}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Stride: {self.stride}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Padding: {self.padding}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Groups: {self.groups}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Activation: {self.activation}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Dropout: {self.dropout}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Change Dilation for Residual Block: {self.multipleDilation}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Number of Residual blocks: {self.residualBlocks}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Model Paramters: {self.modelParams}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
     def _debugIn(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """

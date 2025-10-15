@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from Convolution import ConvolutionBlock
 
-import Types
+import Types, Helpers
 
 # ---------------------------------------------
 # Residual Block
@@ -215,19 +215,18 @@ class ResidualBlock(nn.Module):
         Prints member variables of the class and number of model parameters and trainable model parameters.
         """
 
-        print("Residual Block Parameters:")
-        print(f" - Input Channels: {self.inputChannels}")
-        print(f" - Output Channels: {self.outputChannels}")        
-        print(f" - Kernel: {self.kernel}")
-        print(f" - Stride: {self.stride}")
-        print(f" - Padding: {self.padding}")
-        print(f" - Groups: {self.groups}")
-        print(f" - Activation: {self.activation}")
-        print(f" - Dropout: {self.dropout}")
-        print(f" - Bias: {self.bias}")
-        print(f" - Debug mode: {self.debugMode}")
-        print(f" - Model Parameters: {self.modelParams}")
-        print(f" - Model Trainable Parameters: {self.modelTrainableParams}")
+        Helpers.colourPrint(Types.Colours.BLUE, "Residual Block Parameters:")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Input Channels: {self.inputChannels}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Output Channels: {self.outputChannels}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Kernel: {self.kernel}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Stride: {self.stride}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Padding: {self.padding}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Groups: {self.groups}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Activation: {self.activation}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Dropout: {self.dropout}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Debug mode: {self.debugMode}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Model Paramters: {self.modelParams}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
     def _debugIn(self, x: torch.Tensor) -> None:
         """

@@ -140,13 +140,13 @@ def printDataloader(name: str, data: DataLoader) -> None:
 
     onehot, maskonehot, sequences, y = next(iter(data))
 
-    Helpers.colourPrint(Types.Colours.PURPLE, f"Print stats for {name} DataLoader and 3 rows")
-    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Number of batches: {batches}")
-    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Number of samples: {samples}")
-    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Onehot encoded sequences shape: {onehot.shape}")
-    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Mask for onehot encoded sequences shape: {maskonehot.shape}")
-    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Sequences batch size: {len(sequences)}")
-    Helpers.colourPrint(Types.Colours.PURPLE, f"  - Labels shape: {len(y)}")
+    colourPrint(Types.Colours.PURPLE, f"Print stats for {name} DataLoader and 3 rows")
+    colourPrint(Types.Colours.PURPLE, f"  - Number of batches: {batches}")
+    colourPrint(Types.Colours.PURPLE, f"  - Number of samples: {samples}")
+    colourPrint(Types.Colours.PURPLE, f"  - Onehot encoded sequences shape: {onehot.shape}")
+    colourPrint(Types.Colours.PURPLE, f"  - Mask for onehot encoded sequences shape: {maskonehot.shape}")
+    colourPrint(Types.Colours.PURPLE, f"  - Sequences batch size: {len(sequences)}")
+    colourPrint(Types.Colours.PURPLE, f"  - Labels shape: {len(y)}")
 
     try:
         batch = next(iter(data))
@@ -165,7 +165,7 @@ def printDataloader(name: str, data: DataLoader) -> None:
             })
 
         df = pd.DataFrame(table)
-        print(df)
+        colourPrint(Types.Colours.PURPLE, df.to_string(index=False))
 
     except StopIteration:
         raise ValueError("Empty DataLoader was given")
@@ -544,8 +544,8 @@ def printEpochMetrics(metrics: dict, epochIndex: int) -> None:
     """
 
     df = pd.DataFrame([metrics])
-    print(f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
-    print(df.to_string(index=False))
+    colourPrint(Types.Colours.RED, f"Epoch {epochIndex} Metrics and TP, FP, TN, FN")
+    colourPrint(Types.Colours.WHITE, df.to_string(index=False))
 
 def printEpochAUC(auc: dict, epochIndex: int) -> None:
     """
@@ -561,7 +561,7 @@ def printEpochAUC(auc: dict, epochIndex: int) -> None:
     """
 
     auc = {k: v for k, v in auc.items() if k not in ("fpr", "tpr")}
-    print(f"Epoch {epochIndex} AUC: {auc["auc"]}")
+    colourPrint(Types.Colours.WHITE, f"Epoch {epochIndex} AUC: {auc["auc"]}")
 
 def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
     """
@@ -583,9 +583,9 @@ def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
 
     vMetricsDf = vMetricsDf.drop(columns=["fpr", "tpr"], errors="ignore")
 
-    print("Summary of Metrics computed during Fit")
-    print(tMetricsDf.to_string(index=False))
-    print(vMetricsDf.to_string(index=False))
+    colourPrint(Types.Colours.RED, "Summary of Metrics computed during Fit")
+    colourPrint(Types.Colours.WHITE, tMetricsDf.to_string(index=False))
+    colourPrint(Types.Colours.WHITE, vMetricsDf.to_string(index=False))
 
 def printKFoldMetrics(
     foldMetrics: list,
@@ -604,12 +604,12 @@ def printKFoldMetrics(
     """
 
     df = pd.DataFrame(foldMetrics)
-    print("\nPer-fold validation metrics:")
-    print(df)
+    colourPrint(Types.Colours.RED, "\nPer-fold validation metrics:")
+    colourPrint(Types.Colours.WHITE, df.to_string(index=False))
 
-    print("\n10-Fold summary (mean ± std and sums):")
+    colourPrint(Types.Colours.RED, "\n10-Fold summary (mean ± std and sums):")
     df = pd.DataFrame(foldMetricsSummary)
-    print(df)
+    colourPrint(Types.Colours.WHITE, df.to_string(index=False))
 
 ########## ----------- End --------- ##########
 
@@ -858,12 +858,14 @@ def plotMeanROC(
 
 ########## ----------- End --------- ##########
 
+########## ----------- Print Colour Function --------- ##########
+
 def colourPrint(colour: Types.Colours, msg: str) -> None:
 
     PRINT_BLUE = "\033[34m"
     PRINT_GREEN = "\033[32m"
     PRINT_RED = "\033[31m"
-    PRINT_PURPLE = "\033[95m
+    PRINT_PURPLE = "\033[95m"
     PRINT_RESET = "\033[0m"
 
     if colour == Types.Colours.WHITE:
@@ -880,3 +882,5 @@ def colourPrint(colour: Types.Colours, msg: str) -> None:
 
     elif colour == Types.Colours.PURPLE:
         print(f"{PRINT_PURPLE}{msg}{PRINT_RESET}")
+
+########## ----------- End --------- ##########
