@@ -17,20 +17,114 @@ from sklearn.metrics import (
 )
 
 class DNABERT6:
+    """
+    Class DNABERT6 constructs the pre-trained DNABERT-6 model (Jhi & Zhou, 2021),\n
+    along with essential parameters for the model's fine-tune or feature extraction.\n
+    DNABERT6 accepts 6-mer overlapping input of DNA sequences and produces embeddings.\n
+    DNABERT6 class has the option of loading a fine-tuned model and draw embeddings from\n
+    a list of sequences or be fine-tuned (so the model can adjust on specific data) and saved.
 
+    Attributes
+    ----------
+    trainingDataPath : str
+        File path to csv Dataset for model fine-tune.
+    
+    trainDatasetPercentage : int    
+        Percentage of the fine-tune Dataset to be used (0-100).
+
+    epochs : int
+        Epochs of fine-tuning.
+
+    learningRate : float
+        Learning Rate for fine-tuning.
+
+    windowSize : int
+        Maximum window size for DNA sequences.
+
+    weightDecay : float
+        Weight decay for fine-tune.
+
+    warmupRatio : float
+        Warmpup ratio for fine-tune.
+
+    fineTuneEvalBatchSize : int
+        Batch size for fine-tuning evaluation.
+
+    fineTuneTrainBatchSize : int
+        Batch size for fine-tune training.
+
+    embeddingsBatchSize : int
+        Batch size for embeddings.
+    
+    device: str
+        Device to move model and parameters.
+    
+    hiddenState : Types.HiddenState
+        Type of embeddings to be returned, (CLS, MEAN, BOTH).\n
+        CLS: return embeddings from the CLS token.\n
+        MEAN: return embeddings from mean average of all tokens, except CLS, SEP, PAD.\n
+        BOTH: return concatenation of CLS + MEAN.
+
+    strategy : str
+        Strategy for fine-tuning.
+
+    metric : str
+        Metric to calcualte model inprovment in fine-tuning.
+
+    saveDir : str
+        Directory path to save the model.
+
+    Methods
+    ----------
+    datasetInit() -> None
+        Initialize dataset csv file, tokenise every row with DNABERT's tokenizer.\n
+        Finally, create pyTorch tensor and assign training and validation Datasets to member variables.
+
+    _poolHidden(self, hidden, attentionMask, state: Types.HiddenState, specialTokensMask=None)
+        With hidden(B, L, 768), last_hidden_state from DNABERT and attentionMask for valid positions,\n
+        embeddings are returned for a batch of sequences.\n\n
+
+        For state CLS: embeddings from [CSL] token are returned, size: (B, 768).\n
+        For state MEAN: mean average of embeddings from all tokens except [CLS], [SEP] and [PAD] are returned, size: (B, 768).\n
+        For state BOTH: CLS and MEAN embeddings are concatenated, size: (B,1536). 
+    
+    metrics(self, evalPred) -> dict
+        Function given to Trainer to evaluate metrics: (accuracy, f1_score, loss, precision).\n
+        Returns a dictionary {"accuracy", "precision", "recall", "f1", "cross_entropy"}.
+    
+    encode(self, batch) -> AutoTokenizer
+        Convert batched string to sequences to kmers and return tokenizer.\n
+        Return an AutoTokenizer with batchedKmers.
+
+    finetune(self, **override) -> None
+        Fine-tune the DNABERT-6 model with coding and non-coding labeled smORFs taken from our train.csv.\n
+        Initialize TrainingArguments and Trainer, fine-tune then save model and training arguments to directory.
+
+    embeddings(self, sequences: list) -> torch.Tensor
+        Calculate DNABERT-6 embeddings for a list of sequences. Return a pyTorch Tensor with size (B,768)\n
+        for hidden state  CLS or MEAN or a size of (B, 1536) for hidden state BOTH.
+
+    load(self, modelPath: str) -> None:
+        Fully restore a fine-tuned checkpoint from modelPath directory.
+    
+    history(self) -> pd.DataFrame
+        Return log_history as DataFrame.
+
+    parameters(self) -> None
+        Print model's parameters.
+    """
     def __init__(
                 self,
-                modelID: str                            = Types.DEFAULT_DNABERT6_MODEL_ID,
                 trainingDataPath: str                   = Types.DEFAULT_DNABER6_DATASET_PATH,
-                trainDatasetPercentage                  = Types.DEFAULT_DNABER6_DATASET_PERCENTAGE,
+                trainDatasetPercentage: int             = Types.DEFAULT_DNABER6_DATASET_PERCENTAGE,
                 epochs: int                             = Types.DEFAULT_DNABERT6_EPOCHS,
                 learningRate: float                     = Types.DEFAULT_DNABERT6_LEARNING_RATE,
                 windowSize: int                         = Types.DEFAULT_DNABERT6_WINDOW_SIZE,
                 weightDecay: float                      = Types.DEFAULT_DNABERT6_WEIGHT_DECAY,
                 warmupRatio: float                      = Types.DEFAULT_DNABERT6_WARMUP_RATIO,
-                fineTuneEvalBatchSize                   = Types.DEFAULT_DNABERT6_BATCH_SIZE,
-                fineTuneTrainBatchSize                  = Types.DEFAULT_DNABERT6_BATCH_SIZE,
-                embeddingsBatchSize                     = Types.DEFAULT_DNABERT6_BATCH_SIZE,
+                fineTuneEvalBatchSize: int              = Types.DEFAULT_DNABERT6_BATCH_SIZE,
+                fineTuneTrainBatchSize: int             = Types.DEFAULT_DNABERT6_BATCH_SIZE,
+                embeddingsBatchSize: int                = Types.DEFAULT_DNABERT6_BATCH_SIZE,
                 device: str                             = Types.DEFAULT_DNABERT6_DEVICE,
                 hiddenState: Types.HiddenState          = Types.HiddenState.BOTH,
                 strategy: str                           = Types.DEFAULT_DNABERT6_STRATEGY,
@@ -38,21 +132,10 @@ class DNABERT6:
                 saveDir : str                           = Types.DEFAULT_DNABER6_SAVE_DIRECTORY
             ):
 
-        # tokenizer and model (with classification head)
-
-        self.tokenizer = AutoTokenizer.from_pretrained(modelID)
-
-        # For finding coding - non-coding smORFs we need classification, thus
-        # nothing is frozen, backbone + classifier head all have requires_grad=True
-
-        # Device cuda or cpu
-
+        self.modelID = Types.DEFAULT_DNABERT6_MODEL_ID
+        self.tokenizer = AutoTokenizer.from_pretrained(self.modelID)
         self.device = device
-
-        self.model = AutoModelForSequenceClassification.from_pretrained(modelID, num_labels=2)
-
-        # Initialize hidden state (CLS,MEAN,BOTH)
-
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.modelID, num_labels=2)
         self.hiddenState = hiddenState
 
         if self.hiddenState == Types.HiddenState.BOTH:
@@ -97,38 +180,52 @@ class DNABERT6:
         Helpers.colourPrint(Types.Colours.BLUE, f" - Directory to save the finetuned model: {self.saveDirectory}")
 
     def datasetInit(self) -> None:
-        #initialize dataset from our previously created csv file
+        """
+        Initialize dataset csv file, tokenise every row with DNABERT's tokenizer.\n
+        Finally, create pyTorch tensor and assign training and validation Datasets to member variables.
+        """
 
         split = Helpers.loadDatasetPercentage(self.trainingDataPath, self.trainingDatasetPercentage)
 
         self.trainDataset = split["train"]
         self.validationDataset = split["test"]
 
-        # tokenise every row with DNABERT's tokenizer
-
         self.trainDataset = self.trainDataset.map(self.encode, batched=True, remove_columns=["sequence"])
         self.validationDataset = self.validationDataset.map(self.encode, batched=True, remove_columns=["sequence"])
 
-        # create PyTorch tensors
         self.trainDataset.set_format(type="torch")
         self.validationDataset.set_format(type="torch")
 
         Helpers.colourPrint(Types.Colours.PURPLE, f"Initialized Training Dataset: {self.trainDataset.shape}")
         Helpers.colourPrint(Types.Colours.PURPLE, f"Initialized Validation Dataset: {self.validationDataset.shape}")
 
-    def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState, specialTokensMask=None):
+    def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState, specialTokensMask=None) -> torch.Tensor:
         """
-        hidden : (B, L, 768) - last_hidden_state from DNABERT
-        
-        - For state CLS the CLs embeddings from DNABERT6 are returned.
-        (B, 768)
+        With hidden(B, L, 768), last_hidden_state from DNABERT and attentionMask for valid positions,\n
+        embeddings are returned for a batch of sequences.\n\n
 
-        - For state MEAN a mean of all embeddings is calculated excluding 
-        embeddings from the CLS token.
-        (B, 768)
+        For state CLS: embeddings from [CSL] token are returned, size: (B, 768).\n
+        For state MEAN: mean average of embeddings from all tokens except [CLS], [SEP] and [PAD] are returned, size: (B, 768).\n
+        For state BOTH: CLS and MEAN embeddings are concatenated, size: (B,1536).
 
-        - For state BOTH the 2 embeddings of CLS and MEAN are concatenated.
-        (B, 1536)
+        Parameters
+        ----------
+        hidden
+            DNABERT's last hidden state.
+
+        attentionMask
+            Mask for padded positions of the sequence.
+
+        state : Types.HiddenState
+            Which embeddings to return CLS, MEAN or BOTH.
+
+        specialTokensMask
+            Mask for special tokens [CLS], [SEP], etc.
+
+        Return
+        ----------
+        Tensor
+            DNABERT-6 embeddings Tensor.
         """
 
         if state == Types.HiddenState.CLS:
@@ -136,42 +233,45 @@ class DNABERT6:
             return hidden[:, 0, :]
         
         elif state == Types.HiddenState.MEAN:
-            # --- NEW: build valid mask = attention_mask & ~special_tokens_mask (exclude CLS/SEP/PAD) ---
+
             if specialTokensMask is not None:
                 valid = (attentionMask.bool() & (~specialTokensMask.bool()))
             else:
-                # fallback: exclude CLS only, keep using attentionMask to drop PAD
-                # (keeps previous behavior if special mask wasn't provided)
                 valid = attentionMask.bool()
-                valid[:, 0] = False  # drop CLS
+                valid[:, 0] = False
 
-            M = valid.to(dtype=hidden.dtype).unsqueeze(-1)    # (B,L,1)
+            mask = valid.to(dtype=hidden.dtype).unsqueeze(-1)
 
-            summed  = (hidden * M).sum(dim=1)                 # (B,768)
-            counts  = M.sum(dim=1).clamp_min(1e-9)            # (B,1)
+            summed  = (hidden * mask).sum(dim=1)
+            counts  = mask.sum(dim=1).clamp_min(1e-9)
             mean    = summed / counts
             return mean
 
         elif state == Types.HiddenState.BOTH:
 
-            # Re-use the two branches above
-            cls_vec  = self._poolHidden(hidden, attentionMask, Types.HiddenState.CLS)
-            mean_vec = self._poolHidden(hidden, attentionMask, Types.HiddenState.MEAN)
+            clsEmd = self._poolHidden(hidden, attentionMask, Types.HiddenState.CLS)
+            meanEmb = self._poolHidden(hidden, attentionMask, Types.HiddenState.MEAN)
 
-            combined = torch.cat([cls_vec, mean_vec], dim=-1)  # (B, 1536)
+            combined = torch.cat([clsEmd, meanEmb], dim=-1)
             return combined
 
         else:
             raise ValueError("state must be CLS, MEAN or BOTH")
 
-    def metrics(self, evalPred) -> dict:
+    def metrics(self, evalPred: tuple) -> dict:
         """
-        Function given to Trainer to evaluate metrics: 
-        accuracy, f1_score, loss, precision.
+        Function given to Trainer to evaluate metrics: (accuracy, f1_score, loss, precision).
+
+        Parameters
+        ----------        
+        evalPred : tuple
+            Evalutation prediction from DNABERT6 Trainer.
+        
+        Return
+        ----------
+        dict
+            Dictionary of metrics {"accuracy", "precision", "recall", "f1", "cross_entropy"}.
         """
-        # evalPred is usually an EvalPrediction from HF Trainer.
-        # In some configs .predictions can be a tuple (e.g., (loss, logits)),
-        # so we grab logits in a tuple-safe way.
 
         logits = (
             evalPred.predictions[0]
@@ -179,28 +279,20 @@ class DNABERT6:
             else evalPred.predictions
         )
 
-        labels = evalPred.label_ids # ground-truth class ids (shape [N])
+        labels = evalPred.label_ids
 
         logits = np.asarray(logits, dtype=np.float64)
         labels = np.asarray(labels)
 
-        # ── Stable softmax to turn logits into probabilities ──
-        # Subtract row-wise max to avoid overflow in exp().
-
         logits -= logits.max(axis=1, keepdims=True)
         exp_logits = np.exp(logits)
         probs = exp_logits / exp_logits.sum(axis=1, keepdims=True)
-
-        # Class predictions = argmax over probabilities.
 
         preds = probs.argmax(axis=1)
 
         acc  = accuracy_score(labels, preds)
         f1   = f1_score(labels, preds)
         prec, rec, _, _ = precision_recall_fscore_support(labels, preds, average="binary", zero_division=0)
-
-        # Cross-entropy (log loss) expects PROBABILITIES, not logits.
-        # labels=[0,1] fixes the class order even if one class is absent in a batch.
 
         ce_loss = log_loss(labels, probs,labels=[0, 1])
 
@@ -212,10 +304,21 @@ class DNABERT6:
             "cross_entropy": ce_loss,
         } 
 
-    def encode(self, batch):
+    def encode(self, batch) -> AutoTokenizer:
         """
         Convert batched string to sequences to kmers and return tokenizer
+
+        Parameters
+        ----------
+        batch : list
+            Batch of sequences.
+        
+        Return
+        ----------
+        AutoTokenizer
+            Tokenizer for DNABERT-6 model with batchedKmers.
         """
+
         batchKmers = [Helpers.kmerDnabert(seq, Types.DEFAULT_DNABERT6_KMER_SIZE, Types.KmerAmbiguousState.MASK) for seq in batch["sequence"]]
 
         return self.tokenizer(
@@ -228,46 +331,55 @@ class DNABERT6:
         )
 
     def finetune(self, **override) -> None:
-            """
-            Fine-tune the dnabert 6 model, coding and non-coding
-            labeled smORFs taken from our train.csv
-            """
-
-            self.args = TrainingArguments(
-                output_dir                  = self.saveDirectory,
-                num_train_epochs            = self.epochs,
-                per_device_train_batch_size = self.fineTuneTrainBatchSize,
-                per_device_eval_batch_size  = self.fineTuneEvalBatchSize,
-                learning_rate               = self.learningRate,
-                weight_decay                = self.weightDecay,
-                warmup_ratio                = self.warmupRatio,
-                eval_strategy               = self.strategy,
-                save_strategy               = self.strategy,
-                logging_strategy            = self.strategy,
-                load_best_model_at_end      = True,
-                metric_for_best_model       = self.metric,
-                greater_is_better           = True,
-                max_grad_norm               = 1.0,
-            )
-
-            self.trainer = Trainer(
-                self.model,
-                self.args,
-                train_dataset               = self.trainDataset,
-                eval_dataset                = self.validationDataset,
-                compute_metrics             = self.metrics,
-            )
-
-            self.trainer.train()
-            self.trainer.save_model(self.saveDirectory)
-            self.tokenizer.save_pretrained(self.saveDirectory)
-            Helpers.colourPrint(Types.Colours.GREEN, f"DNABERT-6 fine-tuned model saved to  {Path(self.saveDirectory).resolve()}")
-
-    def embeddings(self, sequences) -> torch.Tensor:
-        
         """
-        Return an (N, D) NumPy matrix of embeddings. Default size
-        of embeddings returned from dnabert6 model is 768.
+        Fine-tune the DNABERT-6 model with coding and non-coding labeled smORFs taken from our train.csv.\n
+        Initialize TrainingArguments and Trainer, fine-tune then save model and training arguments to directory.
+        """
+
+        self.args = TrainingArguments(
+            output_dir                  = self.saveDirectory,
+            num_train_epochs            = self.epochs,
+            per_device_train_batch_size = self.fineTuneTrainBatchSize,
+            per_device_eval_batch_size  = self.fineTuneEvalBatchSize,
+            learning_rate               = self.learningRate,
+            weight_decay                = self.weightDecay,
+            warmup_ratio                = self.warmupRatio,
+            eval_strategy               = self.strategy,
+            save_strategy               = self.strategy,
+            logging_strategy            = self.strategy,
+            load_best_model_at_end      = True,
+            metric_for_best_model       = self.metric,
+            greater_is_better           = True,
+            max_grad_norm               = 1.0,
+        )
+
+        self.trainer = Trainer(
+            self.model,
+            self.args,
+            train_dataset               = self.trainDataset,
+            eval_dataset                = self.validationDataset,
+            compute_metrics             = self.metrics,
+        )
+
+        self.trainer.train()
+        self.trainer.save_model(self.saveDirectory)
+        self.tokenizer.save_pretrained(self.saveDirectory)
+        Helpers.colourPrint(Types.Colours.GREEN, f"DNABERT-6 fine-tuned model saved to  {Path(self.saveDirectory).resolve()}")
+
+    def embeddings(self, sequences: list) -> torch.Tensor:
+        """
+        Calculate DNABERT-6 embeddings for a list of sequences. Return a pyTorch Tensor with size (B,768)\n
+        for hidden state  CLS or MEAN or a size of (B, 1536) for hidden state BOTH.
+
+        Parameters
+        ----------
+        sequences : list
+            List of sequencers to calculate embeddings.
+        
+        Return
+        ----------
+        Tensor
+            Embeddings Tensor for sequences list.
         """
 
         self.model.eval()
@@ -307,27 +419,22 @@ class DNABERT6:
 
     def load(self, modelPath: str) -> None:
         """
-        Fully restore a fine-tuned checkpoint:
+        Fully restore a fine-tuned checkpoint from modelPath directory.
 
-        • tokenizer.json, vocab.txt, self.tokenizer member variable
-        • model.safetensors / pytorch_model, self.model member variable
-        • training_args.bin, self.args and other member variables
+        Parameters
+        ----------
+        modelPath : str
+            Path to model's save directory.
         """
         path = Path(modelPath)
-
-        # initialize tokenizer and model
 
         self.tokenizer = AutoTokenizer.from_pretrained(path)
         self.model     = AutoModelForSequenceClassification.from_pretrained(path)
         self.model.eval()
 
-        # initialize training arguments
-
         argsPath = path/"training_args.bin"
         if argsPath.exists():
             self.args = torch.load(argsPath, weights_only=False)
-
-            # pull the key hyper-params back into the object
 
             self.epochs = int(self.args.num_train_epochs)
             self.learningRate = float(self.args.learning_rate)
@@ -340,10 +447,19 @@ class DNABERT6:
         Helpers.colourPrint(Types.Colours.GREEN, f"Loaded DNABERT-6 fine-tuned model from: {path.resolve()}")
 
     def history(self) -> pd.DataFrame:
+        """
+        Return log_history as DataFrame.
 
+        Return
+        ----------
+        DataFrame
+            Log history as DataFrame.
+        """
         history = self.trainer.state.log_history
         return pd.DataFrame(history)
 
     def parameters(self) -> None:
-
+        """
+        Print model's parameters.
+        """
         Helpers.colourPrint(Types.Colours.BLUE, f"{self.model.named_parameters()}")
