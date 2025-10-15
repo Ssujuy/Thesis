@@ -18,6 +18,7 @@ def finetune(
     """
     Initializes DNABERT6 model class and fine-tunes the pre-trained DNABERT-6 model.
     """
+
     model = dnabert6.DNABERT6(
         trainingDataPath=datasetPath,
         trainDatasetPercentage=datasetPercentage,
