@@ -131,6 +131,60 @@ class DNABERT6:
                 metric: str                             = Types.DEFAULT_DNABER6_METRIC,
                 saveDir : str                           = Types.DEFAULT_DNABER6_SAVE_DIRECTORY
             ):
+        """
+        Constructor for DNABERT6 class. Initializes member variables and DNABERT-6 pre-trained model,\n
+        that can be fine-tuned or used to draw embeddings from a list of sequences.
+
+        Attributes
+        ----------
+        trainingDataPath : str
+            File path to csv Dataset for model fine-tune.
+        
+        trainDatasetPercentage : int    
+            Percentage of the fine-tune Dataset to be used (0-100).
+
+        epochs : int
+            Epochs of fine-tuning.
+
+        learningRate : float
+            Learning Rate for fine-tuning.
+
+        windowSize : int
+            Maximum window size for DNA sequences.
+
+        weightDecay : float
+            Weight decay for fine-tune.
+
+        warmupRatio : float
+            Warmpup ratio for fine-tune.
+
+        fineTuneEvalBatchSize : int
+            Batch size for fine-tuning evaluation.
+
+        fineTuneTrainBatchSize : int
+            Batch size for fine-tune training.
+
+        embeddingsBatchSize : int
+            Batch size for embeddings.
+        
+        device: str
+            Device to move model and parameters.
+        
+        hiddenState : Types.HiddenState
+            Type of embeddings to be returned, (CLS, MEAN, BOTH).\n
+            CLS: return embeddings from the CLS token.\n
+            MEAN: return embeddings from mean average of all tokens, except CLS, SEP, PAD.\n
+            BOTH: return concatenation of CLS + MEAN.
+
+        strategy : str
+            Strategy for fine-tuning.
+
+        metric : str
+            Metric to calcualte model inprovment in fine-tuning.
+
+        saveDir : str
+            Directory path to save the model.
+        """
 
         self.modelID = Types.DEFAULT_DNABERT6_MODEL_ID
         self.tokenizer = AutoTokenizer.from_pretrained(self.modelID)
