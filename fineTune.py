@@ -1,8 +1,5 @@
-import argparse, dnabert6, csv
+import argparse, dnabert6
 import Types, Helpers
-import pandas as pd
-from pathlib import Path
-import torch
 
 def finetune(
     datasetPath: str,
@@ -18,7 +15,9 @@ def finetune(
     hiddenState: Types.HiddenState,
     saveDir: str
 ):
-
+    """
+    Initializes DNABERT6 model class and fine-tunes the pre-trained DNABERT-6 model.
+    """
     model = dnabert6.DNABERT6(
         trainingDataPath=datasetPath,
         trainDatasetPercentage=datasetPercentage,
@@ -36,13 +35,10 @@ def finetune(
 
     model.datasetInit()
     model.finetune()
-    print("Run 'features' Mode to extract embeddings from DNABERT6 and other features for CNN Classifier!")
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(
-        description="Fine tune DNABERT6 model for coding vs non-coding smORFs with 'finetune' Mode."
-    )
+    parser = argparse.ArgumentParser(description="Fine tune DNABERT6 model for coding vs non-coding smORFs")
 
     parser.add_argument("--datasetPath", type=str, required=True, help="CSV with 'sequence' + 'label' columns.")
     parser.add_argument("--datasetPercentage", type=int, default=100, help="N% of the dataset that will be used for finetune.")
@@ -59,7 +55,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print("Initializing DNABERT6 model and starting finetune process")
+    Helpers.colourPrint(Types.Colours.WHITE, "Initializing DNABERT6 model and starting finetune process")
 
     hiddenStateMap = {
         "cls":  Types.HiddenState.CLS,

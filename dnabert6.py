@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np, torch
 from pathlib import Path
 import Types, Helpers
-import torch.nn.functional as F
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
