@@ -30,6 +30,15 @@ class SmORFCNN(nn.Module):
     
     Attributes
     ----------
+    forwardDebugLimit : int
+        Limit for times debug logs are printed in forward.
+    
+    forwardDebugCounter : int
+        Counter for debug logs in forward.
+
+    debugMode : bool
+        Turns debug mode on when true (more information).
+
     onehotInputChannels : int
         Size of onehot encoded sequences.
 
@@ -188,8 +197,34 @@ class SmORFCNN(nn.Module):
 
     kFoldCrossValidation()
 
+    predict()
+        Reads sequences from FASTA file and converts them to a list.\n
+        For each sequence create 1hot encoded sequence, mask and dnabert6 embeddings.\n
+        Pass the tensor through forward and find the label based on the probabillity from sigmoid.\n
+        Finally create a csv file with all the sequences, labels and probibillities.\n
+
+        FASTA file loaded from class atribute's: `predictInputPath`.\n
+        Csv file saved to class atribute path: `predictOutputPath`.\n
+
+        Finally, prints a count of coding vs non-coding labels and a percentage, based on the total sequences.
+
     print():
         Prints member variables of the class and number of model parameters and trainable model parameters.
+
+    _debugInit():
+        Prints initial member variables of the model and total parameters.
+
+    _debugIn(xOnehot : Tensor, xEmbeddings : Tensor, maskOnehot : Tensor):
+        Prints model's forward input shapes and dtypes for xOnehot, maskOnehot and xEmbeddings.\n
+        Prints will occur until limit is reached and debugMode is True.
+
+    debugLogits(self, logits : Tensor):
+        Prints logits shape and a small sample.\n
+        Prints will occur until limit is reached and debugMode is True.
+
+    def _debugFinal(probabilities : Tensor, targets : Tensor, runningLoss : float, n : int, function : str, epochIndex : int)
+        Prints final stats at the end of epoch. Prints shape of probabillities and targets.\n
+        Prints epoch's loss. Prints will occur only for first epoch.
     """
     def __init__(
         self,
@@ -232,7 +267,8 @@ class SmORFCNN(nn.Module):
         valSplit: float                         = Types.DEFAULT_SMORFCNN_VALIDATION_SPLIT,
         testSplit: float                        = Types.DEFAULT_SMORFCNN_TEST_SPLIT,
         epochs: int                             = Types.DEFAULT_SMORFCNN_EPOCHS,
-        debug: bool                             = Types.DEFAULT_DEBUG_MODE
+        debug: bool                             = Types.DEFAULT_DEBUG_MODE,
+        forwardDebugLimit: int                  = Types.DEFAULT_FORWARD_DEBUG_LIMIT
     ):
         """
         Constructs the complete smORF Classifier, using multi branched Multiple Kernel Convolution and DNABERT6 embeddings.\n
@@ -342,11 +378,18 @@ class SmORFCNN(nn.Module):
 
         epochs : int
             Number of epochs for fit.
+
+        debug : bool
+            Turns debug mode on when true (more information).
+
+        forwardDebugLimit : int
+            Limit for times debug logs are printed in forward.
         """
         super().__init__()
 
         self.debugMode = debug
-        self.forwardDebugOnce = debug
+        self.forwardDebugCounter = 0
+        self.forwardDebugLimit = forwardDebugLimit
         self.seed = seed
         self.deterministic = deterministic
         self.device = device
@@ -412,13 +455,17 @@ class SmORFCNN(nn.Module):
             self.multiKernelClass = MultiKernelConvolution(
                 inputChannels=self.onehotInputChannels,
                 outputChannelsKernel=self.outputChannelsPerKernel,
-                kernelList=self.multiKernelList
+                kernelList=self.multiKernelList,
+                debug=self.debugMode,
+                forwardDebugLimit=self.forwardDebugLimit
             )
 
             self.multiKernelTemporalClass = TemporalHead(
                 self.multiKernelClass.outputChannels,
                 hiddenChannels=self.temporalHeadOutputChannels,
-                residualBlocks=self.residualBlocks
+                residualBlocks=self.residualBlocks,
+                debug=self.debugMode,
+                forwardDebugLimit=self.forwardDebugLimit
             )
 
         if self.multiGapKernel:
@@ -426,13 +473,17 @@ class SmORFCNN(nn.Module):
                 inputChannels=self.onehotInputChannels,
                 outputChannelsGKernel=self.outputChannelsPerGapKernel,
                 kernelList=self.multiGapKernelList,
-                gapList=self.multiGapKernelGapList
+                gapList=self.multiGapKernelGapList,
+                debug=self.debugMode,
+                forwardDebugLimit=self.forwardDebugLimit
             )
 
             self.multiGapKernelTemporalClass = TemporalHead(
                 self.multiGapKernelClass.outputChannels,
                 hiddenChannels=self.temporalHeadOutputChannels,
-                residualBlocks=self.residualBlocks
+                residualBlocks=self.residualBlocks,
+                debug=self.debugMode,
+                forwardDebugLimit=self.forwardDebugLimit
             )
 
         self.featuresDim = self._calculateFeaturesDim()
@@ -678,8 +729,6 @@ class SmORFCNN(nn.Module):
             self.seed
         )
 
-        self._debugDataLoader()
-
         Helpers.printDataloader("Training", self.trainDataLoader)
         Helpers.printDataloader("Validation", self.validationDataLoader)
         Helpers.printDataloader("Testing", self.testDataLoader)
@@ -797,6 +846,7 @@ class SmORFCNN(nn.Module):
         Tensor
             Logits Tensor after the classifier's output.
         """
+
         self._debugIn(xOnehot, xEmbeddings, maskOnehot)
 
         features = []
@@ -840,6 +890,9 @@ class SmORFCNN(nn.Module):
 
         self._debugLogits(logits)
 
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            self.forwardDebugCounter += 1
+
         return logits.squeeze(-1) if self.classes == 1 else logits
 
     def trainEpoch(self, epochIndex: int) -> dict:
@@ -880,13 +933,11 @@ class SmORFCNN(nn.Module):
         except Exception:
             iterator = enumerate(self.trainDataLoader)
 
-        for i, batch in iterator:
+        for _, batch in iterator:
 
             xOnehot, maskOnehot, sequences, y = batch
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
-
-            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Training", i, epochIndex)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
@@ -896,8 +947,6 @@ class SmORFCNN(nn.Module):
             self.optimizer.zero_grad()
 
             outputs = self(xOnehot, xEmbed, maskOnehot)
-
-            self._debugOutEpoch(outputs, "Training", i, epochIndex)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -959,13 +1008,11 @@ class SmORFCNN(nn.Module):
                 leave=False
             )
 
-        for j, batch in iterator:
+        for _, batch in iterator:
 
             xOnehot, maskOnehot, sequences, y = batch
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
-
-            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Validation", j, epochIndex)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
@@ -973,8 +1020,6 @@ class SmORFCNN(nn.Module):
             y = y.to(self.device)
 
             outputs = self(xOnehot, xEmbed, maskOnehot)
-
-            self._debugOutEpoch(outputs, "Validation", j, epochIndex)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -1030,13 +1075,11 @@ class SmORFCNN(nn.Module):
                 leave=False
             )
 
-        for k, batch in iterator:
+        for _, batch in iterator:
 
             xOnehot, maskOnehot, sequences, y = batch
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
-
-            self._debugInEpoch(xOnehot, maskOnehot, xEmbed, y, "Testing", k, 1)
 
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
@@ -1044,8 +1087,6 @@ class SmORFCNN(nn.Module):
             y = y.to(self.device)
 
             outputs = self(xOnehot, xEmbed, maskOnehot)
-
-            self._debugOutEpoch(outputs, "Testing", k, 1)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -1271,6 +1312,15 @@ class SmORFCNN(nn.Module):
     @torch.no_grad()
     def predict(self):
         """
+        Reads sequences from FASTA file and converts them to a list.\n
+        For each sequence create 1hot encoded sequence, mask and dnabert6 embeddings.\n
+        Pass the tensor through forward and find the label based on the probabillity from sigmoid.\n
+        Finally create a csv file with all the sequences, labels and probibillities.\n
+
+        FASTA file loaded from class atribute's: `predictInputPath`.\n
+        Csv file saved to class atribute path: `predictOutputPath`.\n
+
+        Finally, prints a count of coding vs non-coding labels and a percentage, based on the total sequences.
         """
         
         self.eval()
@@ -1370,65 +1420,98 @@ class SmORFCNN(nn.Module):
         return model
 
     def _debugInit(self):
+        """
+        Prints initial member variables of the model and total parameters.
+        """
 
         if self.debugMode:
-            print(f"[INIT] total params={self.modelParams} trainable={self.modelTrainableParams}")
-            print(f"[INIT] optimizer param_groups sizes={[len(g['params']) for g in self.optimizer.param_groups]}")
-            print(f"[INIT] device={self.device} multiKernel={self.multiKernel} temporalHead={self.temporalHead}")
-            print(f"[INIT] onehot kernels={self.onehotKernelList}")
-            print(f"[INIT] fusedDim={self.featuresDim} classifier={self.classifier}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][INIT] total params={self.modelParams} trainable={self.modelTrainableParams}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][INIT] device={self.device} multiKernel={self.multiKernel} multiGapKernel={self.multiGapKernel}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][INIT] fusedDim={self.featuresDim} classifier={self.classifier}")
+
+    def _debugIn(
+            self,
+            xOnehot: torch.Tensor,
+            xEmbeddings: torch.Tensor,
+            maskOnehot: torch.Tensor
+        ):
+        """
+        Prints model's forward input shapes and dtypes for xOnehot, maskOnehot and xEmbeddings.\n
+        Prints will occur until limit is reached and debugMode is True.
+
+        Parameters
+        ----------
+        xOnehot : Tensor
+            Input Tensor of onehot encoded sequences.
+
+        maskOnehot : Tensor
+            Input Tensor for mask of onehot encoded sequences.
+
+        xEmbeddings : Tensor
+            Embeddings Tensor for dnabert6 embeddings.
+        """
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN.forward] Input xOnehot shape={tuple(xOnehot.shape)}-dtype={xOnehot.dtype}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN.forward] Input xEmbeddings shape={tuple(xEmbeddings.shape)}-dtype={xEmbeddings.dtype}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN.forward] Input maskOnehot shape={tuple(maskOnehot.shape)}-dtype={maskOnehot.dtype}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN.forward] Input maskOnehot sum per-batch={maskOnehot.sum(dim=1).detach().cpu().tolist()[:8]}")
     
-    def _debugDataLoader(self):
+    def _debugLogits(self, logits: torch.Tensor):
+        """
+        Prints logits shape and a small sample.\n
+        Prints will occur until limit is reached and debugMode is True.
 
-        if self.debugMode:
-            tIdx  = set(self.trainDataLoader.dataset.indices)
-            vIdx  = set(self.validationDataLoader.dataset.indices)
-            teIdx = set(self.testDataLoader.dataset.indices)
-            print(f"[SPLIT] |train|={len(tIdx)} |val|={len(vIdx)} |test|={len(teIdx)} "
-                f"overlap train∩val={len(tIdx & vIdx)} train∩test={len(tIdx & teIdx)} val∩test={len(vIdx & teIdx)}")
+        Parameters
+        ----------
+        logits : Tensor
+            Logits produced from classifier.
+        """
 
-    def _debugIn(self, xOnehot, xEmbeddings, maskOnehot):
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[SmORFCNN.forward] xOnehot shape={tuple(xOnehot.shape)} "
-                    f"min/max/mean=({xOnehot.detach().min().item():.3f}/{xOnehot.detach().max().item():.3f}/{xOnehot.detach().float().mean().item():.3f})")
-            print(f"[SmORFCNN.forward] xEmbeddings shape={tuple(xEmbeddings.shape)} "
-                    f"min/max/mean=({xEmbeddings.detach().min().item():.3f}/{xEmbeddings.detach().max().item():.3f}/{xEmbeddings.detach().float().mean().item():.3f})")
-            print(f"[SmORFCNN.forward] maskOnehot shape={tuple(maskOnehot.shape)} sum per-batch={maskOnehot.sum(dim=1).detach().cpu().tolist()[:8]}")
-
-    def _debugOnehot(self, inputOneHot):
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[SmORFCNN.forward] onehot features shape={tuple(inputOneHot.shape)}")
-
-    def _debugEmbeddings(self, inputEmbeddings):
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[SmORFCNN.forward] embeddings features shape={tuple(inputEmbeddings.shape)}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN.forward] Logits shape={tuple(logits.shape)}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN.forward] Logits sample={logits.detach().view(-1)[:8].cpu().tolist()}")
     
-    def _debugLogits(self, logits):
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[SmORFCNN.forward] logits shape={tuple(logits.shape)} "
-                f"min/max/mean=({logits.detach().min().item():.3f}/{logits.detach().max().item():.3f}/{logits.detach().float().mean().item():.3f}) "
-                f"sample={logits.detach().view(-1)[:8].cpu().tolist()}")
-            self.forwardDebugOnce = False
+    def _debugFinal(
+            self,
+            probabilities: torch.Tensor,
+            targets: torch.Tensor,
+            runningLoss: float,
+            n: int,
+            function: str,
+            epochIndex: int
+        ):
+        """
+        Prints final stats at the end of epoch. Prints shape of probabillities and targets.\n
+        Prints epoch's loss. Prints will occur only for first epoch.
 
-    def _debugInEpoch(self, xOnehot, maskOnehot, xEmbed, y, func, index, epochIndex):
-        if index == 0 and epochIndex == 1 and self.debugMode:
-            print(f"[{func} Epoch-{epochIndex}] batch0 shapes: xOnehot={tuple(xOnehot.shape)} maskOnehot={tuple(maskOnehot.shape)} "
-                f"y pos rate={(y.sum().item()/max(1,y.numel())):.3f}")
-            print(f"[{func} Epoch-{epochIndex}] xEmbed stats: min={xEmbed.min().item():.3f} max={xEmbed.max().item():.3f} mean={xEmbed.float().mean().item():.3f} "
-                f"len(T)={xEmbed.shape[-1]}")
-    
-    def _debugOutEpoch(self, outputs, func, index, epochIndex):
-        if index == 0 and epochIndex == 1 and self.debugMode:
-            print(f"[{func} Epoch-{epochIndex}] outputs shape={tuple(outputs.shape)} "
-                f"min/max/mean=({outputs.detach().min().item():.3f}/{outputs.detach().max().item():.3f}/{outputs.detach().float().mean().item():.3f})")
-    
-    def _debugFinal(self, probabilities, targets, runningLoss, n, func, epochIndex):
-        if epochIndex == 0 and self.debugMode:
-            print(f"[{func} Epoch{epochIndex}] epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)} "
-            f"loss_avg={runningLoss/max(1,n):.6f}")
+        Parameters
+        ----------
+        probabilities : Tensor
+            Probabillities Tensor.
 
-#mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=False)
-mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
-#mymodel.initializeDataset()
-# mymodel.fit(10)
-mymodel.predict()
+        targets : Tensor
+            Targets Tensor.
+
+        runningLoss : float
+            Epoch's current loss.
+
+        n : int
+            Number of batches.
+        
+        function : str
+            Function name calling debugFinal.
+
+        epchIndex: int
+            Current epoch.   
+        """
+
+        if epochIndex == 1 and self.debugMode:
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][{function} Epoch-{epochIndex}] End of epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)}")
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][{function} Epoch-{epochIndex}] End of epoch loss average={runningLoss/max(1,n):.6f}")
+
+mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=True)
+# mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
+mymodel.initializeDataset()
+mymodel.fit(10)
+# mymodel.predict()

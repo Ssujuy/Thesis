@@ -302,6 +302,6 @@ class ConvolutionBlock(nn.Module):
         if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
             Helpers.colourPrint(
                 Types.Colours.PURPLE,
-                f"[ConvolutionBlock] Output x.shape={tuple(x.shape)}-x.dtype={tuple(x.dtype)}\n"
-                f"[ConvolutionBlock] mask.shape={tuple(mask.shape)}-mask.dtype={tuple(mask.dtype)}"
+                f"[ConvolutionBlock] Output x.shape={tuple(x.shape)}-x.dtype={x.dtype}\n"
+                f"[ConvolutionBlock] mask.shape={tuple(mask.shape)}-mask.dtype={mask.dtype}"
             )

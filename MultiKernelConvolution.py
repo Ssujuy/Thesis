@@ -190,13 +190,13 @@ class MultiKernelConvolution(nn.Module):
         outputs = []
         masks = []
 
-        self._debugIn(x)
+        self._debugIn(x, mask)
 
         for branch in self.branches:
             y, m = branch(x, mask)
             outputs.append(y)
             masks.append(m)
-            self._debugBranch(y)
+            self._debugBranch(y, m)
 
         Lmin = min(y.size(-1) for y in outputs)
         outputs = [y[..., :Lmin] for y in outputs]
@@ -207,7 +207,7 @@ class MultiKernelConvolution(nn.Module):
         for m in masks[1:]:
             combinedMask = (combinedMask | m)
 
-        self._debugOut(out)
+        self._debugOut(out, combinedMask)
 
         if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
             self.forwardDebugCounter += 1
