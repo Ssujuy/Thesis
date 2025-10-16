@@ -4,6 +4,7 @@ import torch.nn as nn
 
 ########## ----------- Generic Defaults --------- ##########
 DEFAULT_DEBUG_MODE:                         bool        = False
+DEFAULT_FORWARD_DEBUG_LIMIT:                int         = 2
 ########## ----------- End --------- ##########
 
 ########## ----------- DNABERT6 Defaults --------- ##########
