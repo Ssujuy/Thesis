@@ -17,8 +17,11 @@ class TemporalHead(nn.Module):
 
     Attributes
     ----------
-    forwardDebugOnce : bool
-        Ensures forward will only print logs once to avoid overflowing output
+    forwardDebugLimit : int
+        Limit for times debug logs are printed in forward.
+    
+    forwardDebugCounter : int
+        Counter for debug logs in forward.
 
     debugMode : bool
         Turns debug mode on when true (more information).
@@ -92,7 +95,8 @@ class TemporalHead(nn.Module):
         bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
         multipleDilation: bool      = Types.DEFAULT_TEMPORAL_MULTI_DILATION,
         residualBlocks: int         = Types.DEFAULT_RESIDUAL_BLOCKS_NMB,
-        debug: bool                 = Types.DEFAULT_DEBUG_MODE
+        debug: bool                 = Types.DEFAULT_DEBUG_MODE,
+        forwardDebugLimit: int      = Types.DEFAULT_FORWARD_DEBUG_LIMIT
         ):
         """
         Constructs a Convolution Block for input reduction, a stack of Residual block of size residualBlocks\n
@@ -138,11 +142,15 @@ class TemporalHead(nn.Module):
 
         debug : bool
             Turns debug mode on when true (more information).
+
+        forwardDebugLimit : int
+            Limit for times debug logs are printed in forward.
         """
         super().__init__()
 
         self.debugMode = debug
-        self.forwardDebugOnce = debug
+        self.forwardDebugCounter = 0
+        self.forwardDebugLimit = forwardDebugLimit
         self.inputChannels = inputChannels
         self.hiddenChannels = hiddenChannels
         self.kernelResidual = kernelResidual
@@ -217,16 +225,22 @@ class TemporalHead(nn.Module):
             Concatenation of global max pooling and global average pooling, with shape [B, 2*C] (global-max ⊕ masked-global-avg).
         """
 
+        if not isinstance(mask, torch.Tensor) or not isinstance(x, torch.Tensor):
+            raise TypeError("Input x or mask arguments given is not a Tensor")
+
+        if x is None or mask is None:
+            raise ValueError("Input x or mask tensor is None")
+
         self._debugIn(x, mask)
 
         x, m = self.reduce(x, mask)
 
-        self._debugReduce(x)
+        self._debugReduce(x, m)
 
         for block in self.residualBlocks:
             x, m = block(x, m)
 
-        self._debugRes(x)
+        self._debugResidual(x, m)
 
         gmp = Helpers.globalMaxPooling(x, m)
         gap = Helpers.globalAveragePooling(x, m)
@@ -235,6 +249,10 @@ class TemporalHead(nn.Module):
 
         out = torch.cat([gap,gmp], dim=1)
         self._debugOut(out)
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            self.forwardDebugCounter += 1
+
         return out
 
     def print(self) -> None:
@@ -259,7 +277,8 @@ class TemporalHead(nn.Module):
 
     def _debugIn(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
-        Prints shape of input Tensor and mask Tensor in forward. Only works once for forward and when debugMode is True.
+        Prints shape of input Tensor and mask Tensor in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
@@ -270,42 +289,60 @@ class TemporalHead(nn.Module):
             Mask Tensor of input.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[TemporalHead] in x shape={tuple(x.shape)} mask shape={tuple(mask.shape)} "
-            f"mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}")
-    
-    def _debugReduce(self, x: torch.Tensor) -> None:
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[TemporalHead] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n" 
+                f"[TemporalHead] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
+
+    def _debugReduce(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
         Prints shape of input Tensor and mask Tensor in forward after reduction.\n
-        Only works once for forward and when debugMode is True.
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         x : Tensor
             Input Tensor.
+
+        mask : Tensor
+            Mask Tensor.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[TemporalHead] after reduce shape={tuple(x.shape)}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[TemporalHead] after reduce x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n" 
+                f"[TemporalHead] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
 
-    def _debugRes(self, x: torch.Tensor) -> None:
+    def _debugResidual(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
         Prints shape of input Tensor and mask Tensor in forward after Residual stack.\n
-        Only works once for forward and when debugMode is True.
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         x : Tensor
             Input Tensor.
+
+        mask : Tensor
+            Mask Tensor.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[TemporalHead] after residualBlocks shape={tuple(x.shape)}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[TemporalHead] after residualBlocks x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[TemporalHead] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
+
     
     def  _debugPooling(self, gmp: torch.Tensor, gap: torch.Tensor) -> None:
         """
         Prints type and shape of Gloab Max and Global Average Pooling in forward.\n
-        Only works once for forward and when debugMode is True.
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
@@ -316,13 +353,17 @@ class TemporalHead(nn.Module):
             Gloabal Average Pooling Tensor.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[TemporalHead] GMP type={type(gmp)} shape={tuple(gmp.shape)} "
-            f"GAP type={type(gap)} shape={tuple(gap.shape)}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[TemporalHead] GMP shape={tuple(gmp.shape)}\n"
+                f"[TemporalHead] GAP shape={tuple(gap.shape)}"
+            )
+
     
     def _debugOut(self, out: torch.Tensor) -> None:
         """
-        Prints shape of forward output. Only works once for forward and when debugMode is True.
+        Prints shape of forward output. Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
@@ -330,6 +371,5 @@ class TemporalHead(nn.Module):
             Output Tensor.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[TemporalHead] out shape={tuple(out.shape)}")
-            self.forwardDebugOnce = False
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(Types.Colours.PURPLE, f"[TemporalHead] Output shape={tuple(out.shape)}")

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from Convolution import ConvolutionBlock
 
-import Types
+import Types, Helpers
 
 # ---------------------------------------------
 # Multiple Gapped Kernel Convultion
@@ -15,6 +15,12 @@ class MultiGapKernelConvolution(nn.Module):
 
     Attributes
     ----------
+    forwardDebugLimit : int
+        Limit for times debug logs are printed in forward.
+    
+    forwardDebugCounter : int
+        Counter for debug logs in forward.
+
     debugMode : bool
         Turns debug mode on when true (more information)
 
@@ -76,7 +82,8 @@ class MultiGapKernelConvolution(nn.Module):
         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
         dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
         bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
-        debug: bool                 = Types.DEFAULT_DEBUG_MODE
+        debug: bool                 = Types.DEFAULT_DEBUG_MODE,
+        forwardDebugLimit: int      = Types.DEFAULT_FORWARD_DEBUG_LIMIT
         ):
         """
         Constructs List of Convolution Blocks to draw features with different kernel sizes and gap sizes, initialize member variables.
@@ -132,6 +139,8 @@ class MultiGapKernelConvolution(nn.Module):
         self.dropout = dropout
         self.bias = bias
         self.debugMode = debug
+        self.forwardDebugCounter = 0
+        self.forwardDebugLimit = forwardDebugLimit
 
         self.branches = nn.ModuleList()
         self.pairs = []
@@ -158,6 +167,9 @@ class MultiGapKernelConvolution(nn.Module):
 
         self.outputChannels = self.outputChannelsBranch * len(self.branches)
 
+        self.modelParams = sum(p.numel() for p in self.parameters())
+        self.modelTrainableParams = sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def forward(self, x: torch.Tensor, mask: torch.Tensor):
         """
         Compute convolution with different kernel widths and different gap sizes.\n
@@ -179,10 +191,13 @@ class MultiGapKernelConvolution(nn.Module):
         outputs = []
         masks = []
 
+        self._debugIn(x, mask)
+
         for block in self.branches:
             y, m = block(x, mask)
             outputs.append(y)
             masks.append(m)
+            self._debugBranch(y, m)
 
         Lmin = min(y.size(-1) for y in outputs)
         outputs = [y[..., :Lmin] for y in outputs]
@@ -191,6 +206,93 @@ class MultiGapKernelConvolution(nn.Module):
         outputs = torch.cat(outputs, dim=1)
         masksOut = masks[0]
         for m in masks[1:]:
-            masksOut = (masksOut & m)
+            masksOut = (masksOut | m)
+
+        self._debugOut(outputs, masksOut)
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            self.forwardDebugCounter += 1
 
         return outputs, masksOut
+    
+    def print(self) -> None:
+        """
+        Prints member variables of the class and number of model parameters and trainable model parameters.
+        """
+
+        Helpers.colourPrint(Types.Colours.BLUE, "Multiple Gap Kernel Convolution Parameters:")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Input Channels: {self.inputChannels}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Output Channels per Gap Kernel: {self.outputChannelsBranch}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Output Channels: {self.outputChannels}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Kernel List: {self.kernelList}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Stride: {self.stride}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Padding: {self.padding}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Groups: {self.groups}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Activation: {self.activation}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Dropout: {self.dropout}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Debug mode: {self.debugMode}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Model Paramters: {self.modelParams}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Model Trainable Parameters: {self.modelTrainableParams}")
+    
+    def _debugIn(self, x: torch.Tensor, mask: torch.Tensor):
+        """
+        Prints shape of input Tensor in forward and mask.\n
+        Prints will occur until limit is reached and debugMode is True.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input Tensor.
+
+        mask : Tensor
+            Mask Tensor of input.
+        """
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[MultiGapKernelConvolution] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[MultiGapKernelConvolution] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
+
+    def _debugBranch(self, b: torch.Tensor, m: torch.Tensor):
+        """
+        Prints shape of each branche's Tensor in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
+        
+        Parameters
+        ----------
+        b : Tensor
+            Input Tensor.
+
+        m : Tensor
+            Mask Tensor.
+        """
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[MultiGapKernelConvolution] Branch x.shape={tuple(b.shape)}-dtype={b.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
+                f"[MultiGapKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
+
+    def _debugOut(self, out: torch.Tensor, m: torch.Tensor) -> None:
+        """
+        Prints shape of output Tensor in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
+
+        Parameters
+        ----------
+        out : Tensor
+            Input Tensor.
+
+        m : Tensor
+            Mask Tensor.
+        """
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[MultiGapKernelConvolution] Output out.shape={tuple(out.shape)}-dtype={out.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
+                f"[MultiGapKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )

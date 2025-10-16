@@ -15,8 +15,11 @@ class ResidualBlock(nn.Module):
 
     Attributes
     ----------
-    forwardDebugOnce : bool
-        Ensures forward will only print logs once to avoid overflowing output
+    forwardDebugLimit : int
+        Limit for times debug logs are printed in forward.
+    
+    forwardDebugCounter : int
+        Counter for debug logs in forward.
 
     debugMode : bool
         Turns debug mode on when true (more information).
@@ -87,7 +90,8 @@ class ResidualBlock(nn.Module):
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
             dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
             bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
-            debug: bool                 = Types.DEFAULT_DEBUG_MODE
+            debug: bool                 = Types.DEFAULT_DEBUG_MODE,
+            forwardDebugLimit: int      = Types.DEFAULT_FORWARD_DEBUG_LIMIT
         ):
         """
         Constructs 2 Convolution Block classes for Residual Mapping and initializes member variables.
@@ -126,11 +130,15 @@ class ResidualBlock(nn.Module):
 
         debug : bool
             Turns debug mode on when true (more information).
+
+        forwardDebugLimit : int
+            Limit for times debug logs are printed in forward.
         """
         super().__init__()
 
+        self.forwardDebugCounter = 0
+        self.forwardDebugLimit = forwardDebugLimit
         self.debugMode = debug
-        self.forwardDebugOnce = debug
         self.inputChannels = inputChannels
         self.outputChannels = outputChannels
         self.kernel = kernel
@@ -200,13 +208,21 @@ class ResidualBlock(nn.Module):
         if x is None or mask is None:
             raise ValueError("Input x or mask tensor is None")
 
+        self._debugIn(x, mask)
         y1, m1 = self.convolution1(x, mask)
         y2, m2 = self.convolution2(y1, m1)
 
         x = x[..., :y2.size(-1)]
         x = x * m2.unsqueeze(1)
 
+        self._debugResidual(x, mask, y2, m2)
+
         out = (x + y2) * m2.unsqueeze(1)
+
+        self._debugOut(out, m2)
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            self.forwardDebugCounter += 1
 
         return out, m2
 
@@ -228,29 +244,82 @@ class ResidualBlock(nn.Module):
         Helpers.colourPrint(Types.Colours.BLUE, f" - Model Paramters: {self.modelParams}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
-    def _debugIn(self, x: torch.Tensor) -> None:
+    def _debugIn(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
-        Prints shape of input Tensor in forward. Only works once for forward and when debugMode is True.
+        Prints shape of input Tensor in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         x : Tensor
-            Input Tensor.        
+            Input Tensor.
+
+        mask : Tensor
+            Mask Tensor of input.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[ResidualBlock] in shape={tuple(x.shape)}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[ResidualBlock] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[ResidualBlock] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
 
-    def _debugOut(self, out: torch.Tensor) -> None:
+    def _debugResidual(
+            self,
+            x: torch.Tensor,
+            mask: torch.Tensor,
+            y2: torch.Tensor,
+            mask2: torch.Tensor
+        ) -> None:
         """
-        Prints shape of output Tensor in forward. Only works once for forward and when debugMode is True.
+        Prints shape of Tensors in forward before residual.\n
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         x : Tensor
-            Input Tensor.        
+            Input Tensor.
+
+        mask : Tensor
+            Mask Tensor of input.
+
+        y2 : Tensor
+            Input Tensor.
+
+        mask2 : Tensor
+            Mask Tensor of input.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[ResidualBlock] out shape={tuple(out.shape)}")
-            self.forwardDebugOnce = False
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[ResidualBlock] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[ResidualBlock] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[ResidualBlock] Input y2.shape={tuple(y2.shape)}-dtype={y2.dtype}, mask.shape={tuple(mask2.shape)}-dtype={mask2.dtype}\n"
+                f"[ResidualBlock] mask sum per-batch={mask2.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
+
+    def _debugOut(self, out: torch.Tensor, mask: torch.Tensor) -> None:
+        """
+        Prints shape of output Tensor in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
+
+        Parameters
+        ----------
+        out : Tensor
+            Output Tensor.
+
+        mask : Tensor
+            Mask Tensor of input.
+        """
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[ResidualBlock] Output x.shape={tuple(out.shape)}-dtype={out.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[ResidualBlock] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )

@@ -15,8 +15,11 @@ class ConvolutionBlock(nn.Module):
 
     Attributes
     ----------
-    forwardDebugOnce : bool
-        Ensures forward will only print logs once to avoid overflowing output
+    forwardDebugLimit : int
+        Limit for times debug logs are printed in forward.
+    
+    forwardDebugCounter : int
+        Counter for debug logs in forward.
 
     debugMode : bool
         Turns debug mode on when true (more information).
@@ -87,7 +90,8 @@ class ConvolutionBlock(nn.Module):
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
             dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
             bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
-            debug: bool                 = Types.DEFAULT_DEBUG_MODE
+            debug: bool                 = Types.DEFAULT_DEBUG_MODE,
+            forwardDebugLimit: int      = Types.DEFAULT_FORWARD_DEBUG_LIMIT
         ):
         """
         Constructs Conv1d, BatchNormalization, acvtivation function and dropout.
@@ -126,10 +130,14 @@ class ConvolutionBlock(nn.Module):
 
         debug : bool
             Turns debug mode on when true (more information).
+
+        forwardDebugLimit : int
+            Limit for times debug logs are printed in forward.
         """
         super().__init__()
 
-        self.forwardDebugOnce = debug
+        self.forwardDebugCounter = 0
+        self.forwardDebugLimit = forwardDebugLimit
         self.debugMode = debug
         self.inputChannels = inputChannels
         self.outputChannels = outputChannels
@@ -177,6 +185,7 @@ class ConvolutionBlock(nn.Module):
         Tensor
             Updated mask after convolution.eq.
         """
+
         if mask is None:
             raise ValueError("mask tensor is None")
 
@@ -209,10 +218,12 @@ class ConvolutionBlock(nn.Module):
         x : Tensor
             Input Tensor.
 
+        mask : Tensor
+            Mask Tensor of input.
         Return
         ----------
         tuple[Tensor, Tensor]
-            Output Tensor and mask Tensor after convolution.  
+            Output Tensor and mask Tensor after convolution.
         """
         
         if not isinstance(mask, torch.Tensor) or not isinstance(x, torch.Tensor):
@@ -221,14 +232,18 @@ class ConvolutionBlock(nn.Module):
         if x is None or mask is None:
             raise ValueError("Input x or mask tensor is None")
 
-        self._debugIn(x)
+        self._debugIn(x, mask)
         y = self.conv1d(x)
         updatedMask = self._updateMask(mask)
         y = y * updatedMask.unsqueeze(1)
         y = self.activation(y)
         y = self.dropout(y)
         y = y * updatedMask.unsqueeze(1)
-        self._debugOut(y)
+        self._debugOut(y, updatedMask)
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            self.forwardDebugCounter += 1
+
         return y, updatedMask
 
     def print(self) -> None:
@@ -249,31 +264,44 @@ class ConvolutionBlock(nn.Module):
         Helpers.colourPrint(Types.Colours.BLUE, f" - Model Paramters: {self.modelParams}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Model Trainable Parameters: {self.modelTrainableParams}")
 
-    def _debugIn(self, x: torch.Tensor) -> None:
+    def _debugIn(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
-        Prints debug information for input shape and type in forward. Only works once for forward and when debugMode is True.
+        Prints debug information for input shape and type in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         x : Tensor
-            Input Tensor.        
+            Input Tensor.
+        
+        mask : Tensor
+            Mask Tensor of input.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[ConvolutionBlock] in shape={tuple(x.shape)} dtype={x.dtype} device={x.device}"
-            f"min={x.detach().min().item():.4f} max={x.detach().max().item():.4f} mean={x.detach().float().mean().item():.4f}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[ConvolutionBlock] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[ConvolutionBlock] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
 
-    def _debugOut(self, x: torch.Tensor) -> None:
+    def _debugOut(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
-        Prints debug information for output shape in forward. Only works once for forward and when debugMode is True.\n
-        Toggles forwardDebugOnce attribute, to only run once.
+        Prints debug information for output shape in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         x : Tensor
-            Input Tensor.        
+            Input Tensor.
+
+        mask : Tensor
+            Mask Tensor of input.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[ConvolutionBlock] out shape={tuple(x.shape)}")
-            self.forwardDebugOnce = False
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[ConvolutionBlock] Output x.shape={tuple(x.shape)}-x.dtype={tuple(x.dtype)}\n"
+                f"[ConvolutionBlock] mask.shape={tuple(mask.shape)}-mask.dtype={tuple(mask.dtype)}"
+            )

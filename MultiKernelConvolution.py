@@ -14,8 +14,11 @@ class MultiKernelConvolution(nn.Module):
 
     Attributes
     ----------
-    forwardDebugOnce : bool
-        Ensures forward will only print logs once to avoid overflowing output
+    forwardDebugLimit : int
+        Limit for times debug logs are printed in forward.
+    
+    forwardDebugCounter : int
+        Counter for debug logs in forward.
 
     debugMode : bool
         Turns debug mode on when true (more information).
@@ -83,7 +86,8 @@ class MultiKernelConvolution(nn.Module):
             activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
             dropout: float              = Types.DEFAULT_CONVOLUTION_DROPOUT,
             bias: bool                  = Types.DEFAULT_CONVOLUTION_BIAS,
-            debug: bool                 = Types.DEFAULT_DEBUG_MODE
+            debug: bool                 = Types.DEFAULT_DEBUG_MODE,
+            forwardDebugLimit: int      = Types.DEFAULT_FORWARD_DEBUG_LIMIT
         ):
         """
         Constructs List of Convolution Blocks to draw features with different kernel sizes and initializes member variables.
@@ -122,11 +126,15 @@ class MultiKernelConvolution(nn.Module):
 
         debug : bool
             Turns debug mode on when true (more information).
+
+        forwardDebugLimit : int
+            Limit for times debug logs are printed in forward.
         """
         super().__init__()
 
         self.debugMode = debug
-        self.forwardDebugOnce = debug
+        self.forwardDebugCounter = 0
+        self.forwardDebugLimit = forwardDebugLimit
         self.inputChannels = inputChannels
         self.outputChannelsKernel = outputChannelsKernel
         self.kernelList = kernelList
@@ -192,15 +200,19 @@ class MultiKernelConvolution(nn.Module):
 
         Lmin = min(y.size(-1) for y in outputs)
         outputs = [y[..., :Lmin] for y in outputs]
-        masks   = [m[..., :Lmin] for m in masks]
+        masks = [m[..., :Lmin] for m in masks]
 
         out = torch.cat(outputs, dim=1)
-        combined_mask = masks[0]
+        combinedMask = masks[0]
         for m in masks[1:]:
-            combined_mask = combined_mask | m
+            combinedMask = (combinedMask | m)
 
         self._debugOut(out)
-        return out, combined_mask
+
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            self.forwardDebugCounter += 1
+
+        return out, combinedMask
 
     def print(self) -> None:
         """
@@ -221,42 +233,65 @@ class MultiKernelConvolution(nn.Module):
         Helpers.colourPrint(Types.Colours.BLUE, f" - Model Paramters: {self.modelParams}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Model Trainable Parameters: {self.modelTrainableParams}")
     
-    def _debugIn(self,x):
+    def _debugIn(self, x: torch.Tensor, mask: torch.Tensor):
         """
-        Prints shape of input Tensor in forward and kernel list of model. Only works once for forward and when debugMode is True.
+        Prints shape of input Tensor in forward and mask.\n
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         x : Tensor
-            Input Tensor.        
+            Input Tensor.
+
+        mask : Tensor
+            Mask Tensor of input.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[MultiKernelConv] in shape={tuple(x.shape)} kernels={self.kernelList}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[MultiKernelConvolution] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[MultiKernelConvolution] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
 
-    def _debugBranch(self,b):
+    def _debugBranch(self, b: torch.Tensor, m: torch.Tensor):
         """
-        Prints shape of each branche's Tensor in forward. Only works once for forward and when debugMode is True.
-
+        Prints shape of each branche's Tensor in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
+        
         Parameters
         ----------
         b : Tensor
-            Input Tensor.        
+            Input Tensor.
+
+        m : Tensor
+            Mask Tensor.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[MultiKernelConv] out shape={tuple(b.shape)}")
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[MultiKernelConvolution] Branch x.shape={tuple(b.shape)}-dtype={b.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
+                f"[MultiKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
 
-    def _debugOut(self, out: torch.Tensor) -> None:
+    def _debugOut(self, out: torch.Tensor, m: torch.Tensor) -> None:
         """
-        Prints shape of output Tensor in forward. Only works once for forward and when debugMode is True.
+        Prints shape of output Tensor in forward.\n
+        Prints will occur until limit is reached and debugMode is True.
 
         Parameters
         ----------
         out : Tensor
-            Input Tensor.        
+            Input Tensor.
+
+        m : Tensor
+            Mask Tensor.
         """
 
-        if self.forwardDebugOnce and self.debugMode:
-            print(f"[MultiKernelConv] concat out shape={tuple(out.shape)}")
-            self.forwardDebugOnce = False
+        if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
+            Helpers.colourPrint(
+                Types.Colours.PURPLE,
+                f"[MultiKernelConvolution] Output out.shape={tuple(out.shape)}-dtype={out.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
+                f"[MultiKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
+            )
