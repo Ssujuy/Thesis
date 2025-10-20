@@ -54,9 +54,6 @@ class ConvolutionBlock(nn.Module):
     conv1d : nn.Conv1d
         Convolution Conv1d from pyTorch.
 
-    batchNormalization : nn.BatchNorm1d
-        Batch Normalization.
-
     activation : nn
         Activation Function.
 

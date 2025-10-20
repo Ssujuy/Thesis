@@ -114,8 +114,8 @@ class DNABERT6:
     """
     def __init__(
                 self,
-                trainingDataPath: str                   = Types.DEFAULT_DNABER6_DATASET_PATH,
-                trainDatasetPercentage: int             = Types.DEFAULT_DNABER6_DATASET_PERCENTAGE,
+                trainingDataPath: str                   = Types.DEFAULT_DNABERT6_DATASET_PATH,
+                trainDatasetPercentage: int             = Types.DEFAULT_DNABERT6_DATASET_PERCENTAGE,
                 epochs: int                             = Types.DEFAULT_DNABERT6_EPOCHS,
                 learningRate: float                     = Types.DEFAULT_DNABERT6_LEARNING_RATE,
                 windowSize: int                         = Types.DEFAULT_DNABERT6_WINDOW_SIZE,
@@ -127,8 +127,8 @@ class DNABERT6:
                 device: str                             = Types.DEFAULT_DNABERT6_DEVICE,
                 hiddenState: Types.HiddenState          = Types.HiddenState.BOTH,
                 strategy: str                           = Types.DEFAULT_DNABERT6_STRATEGY,
-                metric: str                             = Types.DEFAULT_DNABER6_METRIC,
-                saveDir : str                           = Types.DEFAULT_DNABER6_SAVE_DIRECTORY
+                metric: str                             = Types.DEFAULT_DNABERT6_METRIC,
+                saveDir : str                           = Types.DEFAULT_DNABERT6_SAVE_DIRECTORY
             ):
         """
         Constructor for DNABERT6 class. Initializes member variables and DNABERT-6 pre-trained model,\n
