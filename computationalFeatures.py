@@ -82,15 +82,11 @@ class FicketScore():
 
         coding_features_np = np.array(codingFeatures)
         noncoding_features_np = np.array(nonCodingFeatures)
-        print(f"Coding features: {codingFeatures}")
-        print(f"Non Coding features: {nonCodingFeatures}")
 
         self.codingFickettStats['mean'] = coding_features_np.mean(axis=0)
-        print(f"mean coding {self.codingFickettStats}")
         self.codingFickettStats['std'] = coding_features_np.std(axis=0) + 1e-9 
         
         self.nonCodingFickettStats['mean'] = noncoding_features_np.mean(axis=0)
-        print(f"mean coding {self.codingFickettStats}")
         self.nonCodingFickettStats['std'] = noncoding_features_np.std(axis=0) + 1e-9
 
     def _baseFrequencies(self, sequence: str) -> dict:
@@ -144,11 +140,9 @@ class FicketScore():
 
     def score(self, sequence: str) -> float:
         """
-        Calculates the Fickett Score for a given sequence by comparing its 
-        raw features against the trained coding and non-coding distributions.
-        
-        This method returns a single scalar score (not bounded 0-1) that acts as 
-        a strong feature for the classifier.
+        Calculates the Fickett Score for a given sequence by comparing its\n
+        raw features against the trained coding and non-coding distributions.\n
+        This method returns a single scalar score, that acts as a strong feature for the classifier.
         """
 
         if len(sequence) < 3:
@@ -165,30 +159,12 @@ class FicketScore():
             features.append(bias[b])
 
         score = 0.0
-        
-        # Calculate the contribution of each of the 8 features
+
         for i in range(len(features)):
+
             value = features[i]
-            
-            # Numerically robust calculation of the difference in Z-scores (or distance)
-            # A higher score is assigned if the raw feature is closer to the CODING mean
-            # and further from the NON-CODING mean.
-            
-            # Z-score relative to non-coding (distance from non-coding mean)
-            Z_noncoding = (value - self.nonCodingFickettStats['mean'][i]) / self.nonCodingFickettStats['std'][i]
-            
-            # Z-score relative to coding (distance from coding mean)
-            Z_coding = (value - self.codingFickettStats['mean'][i]) / self.codingFickettStats['std'][i]
-            
-            # Score contribution: (Z_noncoding) - (Z_coding)
-            # This difference favors features that are statistically more "coding-like".
-            score_contribution = Z_noncoding - Z_coding
-            
-            score += score_contribution
+            zNonCoding = (value - self.nonCodingFickettStats['mean'][i]) / self.nonCodingFickettStats['std'][i]
+            zCoding = (value - self.codingFickettStats['mean'][i]) / self.codingFickettStats['std'][i]
+            score += zNonCoding - zCoding
 
-        # Final score is the average contribution across all 8 features
         return score / len(features)
-
-fs = FicketScore("test.csv")
-score=fs.score("ATGCGTACGTATGCGTATGCGTACGTTAGTCGTAGTGTGA")
-print(f"Test score for Fickett: {score}")
