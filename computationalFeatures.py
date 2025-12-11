@@ -1,5 +1,6 @@
 import itertools
 import pandas as pd
+import numpy as np
 import math
 
 import Helpers
@@ -49,32 +50,145 @@ class HexamerScore():
     
 class FicketScore():
 
-    def __init__(self, sequencePath: str):
+    def __init__(self, sequencesPath: str):
 
-def ficketScore(sequence: str):
+        self.bases = ['A', 'C', 'G', 'T']
+        self.codingFickettStats = {}
+        self.nonCodingFickettStats = {}
 
-    frame1 = sequence[0::3]
-    frame2 = sequence[1::3]
-    frame3 = sequence[2::3]
+        codingFeatures = []
+        nonCodingFeatures = []
 
-    length = len(sequence)
+        df = pd.read_csv(sequencesPath)
 
-    frequencies = {b: sequence.count(b) / length for b in "ATCG"}
+        for sequence, label in zip(df["sequence"], df["label"]):
 
-    fpos = {b: [frame1.count(b)/len(frame1),
-            frame2.count(b)/len(frame2),
-            frame3.count(b)/len(frame3)] for b in "ATCG"}
+            baseFreq = self._baseFrequencies(sequence)
+            framesFreq = self._frameFrequencies(sequence)
+            bias = self._calculatePeriodicityBias(framesFreq)
+
+            features = []
+
+            for b in self.bases:
+                features.append(baseFreq[b])
+
+            for b in self.bases:
+                features.append(bias[b])
+
+            if label == 1:
+                codingFeatures.append(features)
+            else:
+                nonCodingFeatures.append(features)
+
+        coding_features_np = np.array(codingFeatures)
+        noncoding_features_np = np.array(nonCodingFeatures)
+        print(f"Coding features: {codingFeatures}")
+        print(f"Non Coding features: {nonCodingFeatures}")
+
+        self.codingFickettStats['mean'] = coding_features_np.mean(axis=0)
+        print(f"mean coding {self.codingFickettStats}")
+        self.codingFickettStats['std'] = coding_features_np.std(axis=0) + 1e-9 
+        
+        self.nonCodingFickettStats['mean'] = noncoding_features_np.mean(axis=0)
+        print(f"mean coding {self.codingFickettStats}")
+        self.nonCodingFickettStats['std'] = noncoding_features_np.std(axis=0) + 1e-9
+
+    def _baseFrequencies(self, sequence: str) -> dict:
+
+        frequencies = {}
+        sequenceLength = len(sequence)
+
+        for b in self.bases:
+
+            frequence = sequence.count(b) / sequenceLength
+            frequencies[b] = frequence
+
+        return frequencies
+
+    def _frameFrequencies(self, sequence: str) -> dict:
+
+        frame1 = sequence[0::3]
+        frame2 = sequence[1::3]
+        frame3 = sequence[2::3]
+
+        frequencies = {}
+
+        for b in self.bases:
+
+            frame1Freq = frame1.count(b) / len(frame1) if len(frame1) > 0 else 0
+            frame2Freq = frame2.count(b) / len(frame2) if len(frame2) > 0 else 0
+            frame3Freq = frame3.count(b) / len(frame3) if len(frame3) > 0 else 0
+
+            frequencies[b] = [frame1Freq, frame2Freq, frame3Freq]
+
+        return frequencies
     
-    bias = {b: max(fpos[b]) / (min(fpos[b]) + 1e-9) for b in "ATCG"}
+    def _calculatePeriodicityBias(self, frequencies: dict) -> dict:
 
-    fickett = sum((frequencies[b] + bias[b]) / 2 for b in "ATCG") / 4
+        bias = {}
 
-    return fickett
+        for b in self.bases:
 
-seq1 = "ATGCGTACGTTGCGACCTAGTGACGTGACCATGCGTATCGTGACGATCGTACGTAGCTAGCTG"
-seq2 = "CGTAGCTAGGCTAACGTTGACGATGCGTACGCTTAGCATGACCGATCGTAGCATCGTACGAT"
-seq3 = "GCTAGCATGACGATCGTACGTAGCATGCGTACGATCGTAGCTAGGCTAGCATGACCGTACGA"
+            maxFreq = max(frequencies[b])
+            minFreq = [f for f in frequencies[b] if f > 0]
 
-print("Score 1:", ficketScore(seq1))
-print("Score 2:", ficketScore(seq2))
-print("Score 3:", ficketScore(seq3))
+            if not minFreq:
+                minFreq = 1e-9
+
+            else:
+                minFreq = min(minFreq)
+
+            bias[b] = maxFreq / minFreq
+
+        return bias
+
+    def score(self, sequence: str) -> float:
+        """
+        Calculates the Fickett Score for a given sequence by comparing its 
+        raw features against the trained coding and non-coding distributions.
+        
+        This method returns a single scalar score (not bounded 0-1) that acts as 
+        a strong feature for the classifier.
+        """
+
+        if len(sequence) < 3:
+            raise ValueError("Sequence given is less than 3 nucleotide length")
+
+        baseFreq = self._baseFrequencies(sequence)
+        framesFreq = self._frameFrequencies(sequence)
+        bias = self._calculatePeriodicityBias(framesFreq)
+        
+        features = []
+        for b in self.bases:
+            features.append(baseFreq[b])
+        for b in self.bases:
+            features.append(bias[b])
+
+        score = 0.0
+        
+        # Calculate the contribution of each of the 8 features
+        for i in range(len(features)):
+            value = features[i]
+            
+            # Numerically robust calculation of the difference in Z-scores (or distance)
+            # A higher score is assigned if the raw feature is closer to the CODING mean
+            # and further from the NON-CODING mean.
+            
+            # Z-score relative to non-coding (distance from non-coding mean)
+            Z_noncoding = (value - self.nonCodingFickettStats['mean'][i]) / self.nonCodingFickettStats['std'][i]
+            
+            # Z-score relative to coding (distance from coding mean)
+            Z_coding = (value - self.codingFickettStats['mean'][i]) / self.codingFickettStats['std'][i]
+            
+            # Score contribution: (Z_noncoding) - (Z_coding)
+            # This difference favors features that are statistically more "coding-like".
+            score_contribution = Z_noncoding - Z_coding
+            
+            score += score_contribution
+
+        # Final score is the average contribution across all 8 features
+        return score / len(features)
+
+fs = FicketScore("test.csv")
+score=fs.score("ATGCGTACGTATGCGTATGCGTACGTTAGTCGTAGTGTGA")
+print(f"Test score for Fickett: {score}")
