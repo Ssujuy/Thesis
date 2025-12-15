@@ -12,7 +12,6 @@ class HexamerScore():
     
     Attributes
     ----------
-
     k : int
         Number k of k-mer (split of DNA sequence).
     
