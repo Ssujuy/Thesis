@@ -313,3 +313,36 @@ class FicketScore():
             score += zNonCoding - zCoding
 
         return score / len(features)
+
+class NucleotideBias():
+
+    def __init__(self, sequencesPath: str):
+
+        self.bases = ['A', 'C', 'G', 'T']
+        self.positions = [-3, -2, -1, 3, 4, 5]
+        self.tis = "ATG"
+
+        df = pd.read_csv(sequencesPath)
+
+        self.codingProb = {}
+        self.nonCodingProb = {}
+
+        for p in self.positions:
+            self.codingProb[str(p)] = {}
+            self.nonCodingProb[str(p)] = {}            
+
+        for p in self.positions:
+            for b in self.bases:
+                self.codingProb[str(p)][b] = 0
+                self.nonCodingProb[str(p)][b] = 0
+    
+        for sequence, label in zip(df["sequence"], df["label"]):
+
+            if len(sequence) < len(self.positions) + len(self.tis):
+                raise ValueError(f"Sequence length is less than {len(self.positions) + len(self.tis)}")
+            
+            index = sequence.find(self.tis)
+
+            for pos in self.positions:
+                base = sequence[index + pos]
+b = NucleotideBias("train.csv")
