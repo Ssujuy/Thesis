@@ -471,13 +471,37 @@ class CodonBias:
         """
 
         self.tis = "ATG"
-        self.bases = ['A', 'C', 'G', 'T']
         self.codonLen = 3
 
-        codons = [''.join(codon) for codon in itertools.product(self.bases, repeat=self.codonLen)]
+        self.codonToAminoAcid = {
+            'ATA':'I', 'ATC':'I', 'ATT':'I', 'ATG':'M',
+            'ACA':'T', 'ACC':'T', 'ACG':'T', 'ACT':'T',
+            'AAC':'N', 'AAT':'N', 'AAA':'K', 'AAG':'K',
+            'AGC':'S', 'AGT':'S', 'AGA':'R', 'AGG':'R',
+            'CTA':'L', 'CTC':'L', 'CTG':'L', 'CTT':'L',
+            'CCA':'P', 'CCC':'P', 'CCG':'P', 'CCT':'P',
+            'CAC':'H', 'CAT':'H', 'CAA':'Q', 'CAG':'Q',
+            'CGA':'R', 'CGC':'R', 'CGG':'R', 'CGT':'R',
+            'GTA':'V', 'GTC':'V', 'GTG':'V', 'GTT':'V',
+            'GCA':'A', 'GCC':'A', 'GCG':'A', 'GCT':'A',
+            'GAC':'D', 'GAT':'D', 'GAA':'E', 'GAG':'E',
+            'GGA':'G', 'GGC':'G', 'GGG':'G', 'GGT':'G',
+            'TCA':'S', 'TCC':'S', 'TCG':'S', 'TCT':'S',
+            'TTC':'F', 'TTT':'F', 'TTA':'L', 'TTG':'L',
+            'TAC':'Y', 'TAT':'Y', 'TAA':'_', 'TAG':'_',
+            'TGC':'C', 'TGT':'C', 'TGA':'_', 'TGG':'W',
+        }
 
-        self.codingCodonsCount = {c:0 for c in codons}
-        self.nonCodingCodonsCount = {c:0 for c in codons}
+        df = pd.read_csv(sequencesPath)
+
+        aminoAcids = set(self.codonToAminoAcid.values())
+        codons = self.codonToAminoAcid.keys()
+
+        codingCodonCounts = {c:0 for c in codons}
+        nonCodingCodonCounts = {c:0 for c in codons}
+
+        codingAminoAcidCounts = {aa: 0 for aa in aminoAcids}
+        nonCodingAminoAcidCounts = {aa: 0 for aa in aminoAcids}
 
         for sequence, label in zip(df["sequence"], df["label"]):
 
@@ -491,16 +515,79 @@ class CodonBias:
             
             orfSequence = sequence[index:]
             orfSeqLength = (len(orfSequence) // 3) * 3
-            orfSequence[:orfSeqLength]
+            orfSequence = orfSequence[:orfSeqLength]
 
             for i in range(0, len(orfSequence) , 3):
+
                 codon = orfSequence[i:i+3]
 
-                if label == 1:
-                    self.codingCodonsCount[codon] += 1
+                if codon in self.codonToAminoAcid:
 
-                else:
-                    self.nonCodingCodonsCount[codon] += 1
-    def score(self):
+                    aminoAcid = self.codonToAminoAcid[codon]
+
+                    if aminoAcid == '_':
+                        continue
+
+                    if label == 1:
+                        codingCodonCounts[codon] += 1
+                        codingAminoAcidCounts[aminoAcid] += 1
+
+                    else:
+                        nonCodingCodonCounts[codon] += 1
+                        nonCodingAminoAcidCounts[aminoAcid] += 1
+
+        self.codingProb = {}
+        self.nonCodingProb = {}
+
+        for codon in codons:
+
+            aminoAcid = self.codonToAminoAcid[codon]
+            
+            if aminoAcid == '_':
+                continue
+
+            codingCodonCount = codingCodonCounts[codon]
+            codingAminoAcidCount = codingAminoAcidCounts[aminoAcid]
+            self.codingProb[codon] = codingCodonCount / (codingAminoAcidCount + 1e-9)
+
+            nonCodingCodonCount = nonCodingCodonCounts[codon]
+            nonCodingAminoAcidCount = nonCodingAminoAcidCounts[aminoAcid]
+            self.nonCodingProb[codon] = nonCodingCodonCount / (nonCodingAminoAcidCount + 1e-9)
+
+    def score(self, sequence: str):
         """
         """
+
+        codonBias = 0.0
+        codonsCount = 0
+
+        if len(sequence) < self.codonLen:
+            raise ValueError(f"Given sequence has less than {self.codonLen} bases")
+
+        index = sequence.find(self.tis)
+        if index == -1:
+            return 0.0
+
+        orfSequence = sequence[index:]
+        orfSeqLength = (len(orfSequence) // 3) * 3
+        orfSequence = orfSequence[:orfSeqLength]
+
+        for i in range(0, len(orfSequence), 3):
+            codon = orfSequence[i:i+3]
+            
+            if codon in self.codonToAminoAcid:
+                
+                aminoAcid = self.codonToAminoAcid[codon]
+                if aminoAcid == '_':
+                    continue
+
+                codingPCodon = self.codingProb[codon]
+                nonCodingPCodon = self.nonCodingProb[codon]
+
+                if codingPCodon == 0:
+                    codingPCodon = 1e-9
+
+                codonBias += math.log(codingPCodon / nonCodingPCodon)
+                codonsCount += 1
+
+        return codonBias / codonsCount
