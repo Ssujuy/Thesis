@@ -472,7 +472,35 @@ class CodonBias:
 
         self.tis = "ATG"
         self.bases = ['A', 'C', 'G', 'T']
+        self.codonLen = 3
 
+        codons = [''.join(codon) for codon in itertools.product(self.bases, repeat=self.codonLen)]
+
+        self.codingCodonsCount = {c:0 for c in codons}
+        self.nonCodingCodonsCount = {c:0 for c in codons}
+
+        for sequence, label in zip(df["sequence"], df["label"]):
+
+            if len(sequence) < self.codonLen:
+                continue
+
+            index = sequence.find(self.tis)
+
+            if index == -1:
+                continue
+            
+            orfSequence = sequence[index:]
+            orfSeqLength = (len(orfSequence) // 3) * 3
+            orfSequence[:orfSeqLength]
+
+            for i in range(0, len(orfSequence) , 3):
+                codon = orfSequence[i:i+3]
+
+                if label == 1:
+                    self.codingCodonsCount[codon] += 1
+
+                else:
+                    self.nonCodingCodonsCount[codon] += 1
     def score(self):
         """
         """
