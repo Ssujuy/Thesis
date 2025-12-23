@@ -453,3 +453,26 @@ class NucleotideBias():
                     score -= 10.0
 
         return score
+    
+class CodonBias:
+    """
+    """
+
+    def __init__(self, sequencesPath: str):
+        """
+        Constructs dictionaries codingProb and nonCodingProb from lebaled smORFs dataset located at: `sequencesPath`.
+        codingProb dictionary contains probabillity of a base existing in each position, in coding smORFs.
+        nonCodingProb dictionary contains probabillity of a base existing in each position, in non-coding smORFs.
+
+        Parameters
+        ----------
+        sequencesPath : str
+            Path to csv file containing [sequence, label] columns of known coding and non-coding sequences.
+        """
+
+        self.tis = "ATG"
+        self.bases = ['A', 'C', 'G', 'T']
+
+    def score(self):
+        """
+        """
