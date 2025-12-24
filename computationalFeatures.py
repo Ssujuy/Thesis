@@ -46,7 +46,7 @@ class HexamerScore():
         hexamers = [''.join(kmer) for kmer in itertools.product(self.bases, repeat=self.k)]
 
         self.codingHexamersFreq = {h:0 for h in hexamers}
-        self.nonCodingHexamerFreq = {h:0 for h in hexamers}
+        self.nonCodingHexamersFreq = {h:0 for h in hexamers}
 
         df = pd.read_csv(sequencesPath)
 
@@ -63,16 +63,24 @@ class HexamerScore():
                 else:
                     kmerSequence = Helpers.kmer(sequence, self.k)
                     for kmer in kmerSequence:
-                        self.nonCodingHexamerFreq[kmer] += 1
+                        self.nonCodingHexamersFreq[kmer] += 1
 
-        totalCoding = sum(self.codingHexamersFreq.values()) + 4**self.k * 1.0
-        totalNonCoding = sum(self.nonCodingHexamerFreq.values()) + 4**self.k * 1.0
+        totalCoding = sum(self.codingHexamersFreq.values())
+        totalNonCoding = sum(self.nonCodingHexamersFreq.values())
 
         for key, value in self.codingHexamersFreq.items():
-            self.codingHexamersFreq[key] = (value + 1.0) / totalCoding
 
-        for key, value in self.nonCodingHexamerFreq.items():
-            self.nonCodingHexamerFreq[key] = (value + 1.0) / totalNonCoding
+            self.codingHexamersFreq[key] = value / totalCoding
+
+            if self.codingHexamersFreq[key] == 0:
+                self.codingHexamersFreq[key] = 1e-9
+
+        for key, value in self.nonCodingHexamersFreq.items():
+
+            self.nonCodingHexamersFreq[key] = value / totalNonCoding
+
+            if self.nonCodingHexamersFreq[key] == 0:
+                self.nonCodingHexamersFreq[key] = 1e-9
 
     def score(self, sequence: str) -> float:
         """
@@ -97,7 +105,8 @@ class HexamerScore():
         kmerSequence = Helpers.kmer(sequence, self.k)
 
         for kmer in  kmerSequence:
-            p += math.log(self.codingHexamersFreq[kmer] / self.nonCodingHexamerFreq[kmer])
+
+            p += math.log(self.codingHexamersFreq.get(kmer, 1e-9) / self.nonCodingHexamersFreq.get(kmer, 1e-9))
             total += 1
 
         return p / total
@@ -409,12 +418,21 @@ class NucleotideBias():
             totalCodingInPos = sum(self.codingProb[str(p)].values())
             totalNonCodingInPos = sum(self.nonCodingProb[str(p)].values())
 
-            if totalCodingInPos == 0: totalCodingInPos = 1
-            if totalNonCodingInPos == 0: totalNonCodingInPos = 1
+            if totalCodingInPos == 0:
+                totalCodingInPos = 1.0
+
+            if totalNonCodingInPos == 0:
+                totalNonCodingInPos = 1.0
 
             for b in self.bases:
-                self.codingProb[str(p)][b] = (self.codingProb[str(p)][b] + 1) / (totalCodingInPos + 4) 
-                self.nonCodingProb[str(p)][b] = (self.nonCodingProb[str(p)][b] + 1) / (totalNonCodingInPos + 4)
+                self.codingProb[str(p)][b] = self.codingProb[str(p)][b] / totalCodingInPos
+                self.nonCodingProb[str(p)][b] = self.nonCodingProb[str(p)][b] / totalNonCodingInPos
+
+                if self.codingProb[str(p)][b] == 0.0:
+                    self.codingProb[str(p)][b] = 1e-9
+
+                if self.nonCodingProb[str(p)][b] == 0.0:
+                    self.nonCodingProb[str(p)][b] = 1e-9
 
     def score(self, sequence: str) -> float:
         """
@@ -430,6 +448,9 @@ class NucleotideBias():
         float
             Nucleotide Bias score of the given sequence.
         """
+
+        if len(sequence) < len(self.tis):
+            raise ValueError(f"Given sequence has less than {len(self.tis)} bases")
 
         score = 0.0
         index = sequence.find(self.tis)
@@ -447,13 +468,7 @@ class NucleotideBias():
             base = sequence[positionIndex]
 
             if base in self.bases:
-
-                frac = self.codingProb[str(p)][base] / (self.nonCodingProb[str(p)][base] + 1e-9)
-
-                if frac > 0.0:
-                    score += math.log(frac)
-                else:
-                    score -= 10.0
+                score += math.log(self.codingProb[str(p)][base] / self.nonCodingProb[str(p)][base])
 
         return score
     
@@ -577,9 +592,15 @@ class CodonBias:
             codingAminoAcidCount = codingAminoAcidCounts[aminoAcid]
             self.codingProb[codon] = codingCodonCount / (codingAminoAcidCount + 1e-9)
 
+            if self.codingProb[codon] == 0.0:
+                self.codingProb[codon] = 1e-9
+
             nonCodingCodonCount = nonCodingCodonCounts[codon]
             nonCodingAminoAcidCount = nonCodingAminoAcidCounts[aminoAcid]
             self.nonCodingProb[codon] = nonCodingCodonCount / (nonCodingAminoAcidCount + 1e-9)
+
+            if self.nonCodingProb[codon] == 0.0:
+                self.nonCodingProb[codon] = 1e-9
 
     def score(self, sequence: str):
         """
@@ -619,16 +640,7 @@ class CodonBias:
                 if aminoAcid == '_':
                     continue
 
-                codingPCodon = self.codingProb[codon]
-                nonCodingPCodon = self.nonCodingProb[codon]
-
-                if codingPCodon == 0:
-                    codingPCodon = 1e-9
-
-                if nonCodingPCodon == 0:
-                    nonCodingPCodon = 1e-9
-
-                codonBias += math.log(codingPCodon / nonCodingPCodon)
+                codonBias += math.log(self.codingProb.get(codon, 1e-9) / self.nonCodingProb.get(codon, 1e-9))
                 codonsCount += 1
 
         return codonBias / codonsCount
