@@ -46,7 +46,7 @@ class HexamerScore():
         hexamers = [''.join(kmer) for kmer in itertools.product(self.bases, repeat=self.k)]
 
         self.codingHexamersFreq = {h:0 for h in hexamers}
-        self.nonCodingHemaerFreq = {h:0 for h in hexamers}
+        self.nonCodingHexamerFreq = {h:0 for h in hexamers}
 
         df = pd.read_csv(sequencesPath)
 
@@ -63,16 +63,16 @@ class HexamerScore():
                 else:
                     kmerSequence = Helpers.kmer(sequence, self.k)
                     for kmer in kmerSequence:
-                        self.nonCodingHemaerFreq[kmer] += 1
+                        self.nonCodingHexamerFreq[kmer] += 1
 
         totalCoding = sum(self.codingHexamersFreq.values()) + 4**self.k * 1.0
-        totalNonCoding = sum(self.nonCodingHemaerFreq.values()) + 4**self.k * 1.0
+        totalNonCoding = sum(self.nonCodingHexamerFreq.values()) + 4**self.k * 1.0
 
         for key, value in self.codingHexamersFreq.items():
             self.codingHexamersFreq[key] = (value + 1.0) / totalCoding
 
-        for key, value in self.nonCodingHemaerFreq.items():
-            self.nonCodingHemaerFreq[key] = (value + 1.0) / totalNonCoding
+        for key, value in self.nonCodingHexamerFreq.items():
+            self.nonCodingHexamerFreq[key] = (value + 1.0) / totalNonCoding
 
     def score(self, sequence: str) -> float:
         """
@@ -97,7 +97,7 @@ class HexamerScore():
         kmerSequence = Helpers.kmer(sequence, self.k)
 
         for kmer in  kmerSequence:
-            p += math.log(self.codingHexamersFreq[kmer] / self.nonCodingHemaerFreq[kmer])
+            p += math.log(self.codingHexamersFreq[kmer] / self.nonCodingHexamerFreq[kmer])
             total += 1
 
         return p / total
@@ -396,6 +396,9 @@ class NucleotideBias():
 
                 base = sequence[positionIndex]
 
+                if base not in self.bases:
+                    continue
+
                 if label == 1:
                     self.codingProb[str(p)][base] += 1
                 else:
@@ -456,13 +459,37 @@ class NucleotideBias():
     
 class CodonBias:
     """
+    Class that initializes dictionaries from coding and non-coding small open reading frame DNA samples for Codon Bias calculation.
+    Look-up dictionaries are used to calculate coding and non coding probabillity of codons, which is calculated by the ratio of codon frequency and amino acid frequency.
+    
+    Attributes
+    ----------
+    tis : str
+        Translation Initiation Site.
+    
+    codonLen : int
+        Length of codons.
+    
+    codonToAminoAcid : dict
+        Dictionary with all possible codons as keys and their produced amino acids as values.
+
+    codingProb : dict
+        Dictionary with codons as keys and their saved probability (codonCount / amino acid count), for coding smORFs.
+
+    nonCodingProb : dict
+        Dictionary with codons as keys and their saved probability (codonCount / amino acid count), for non-coding smORFs.        
+
+    Methods
+    ----------
+    score(sequence: str) -> float
+        Calculates and returns Codon Bias of a given DNA sequence. 
     """
 
     def __init__(self, sequencesPath: str):
         """
-        Constructs dictionaries codingProb and nonCodingProb from lebaled smORFs dataset located at: `sequencesPath`.
-        codingProb dictionary contains probabillity of a base existing in each position, in coding smORFs.
-        nonCodingProb dictionary contains probabillity of a base existing in each position, in non-coding smORFs.
+        Initializes codon to amino acid dictionary, imports the csv DataFrame and counts codons and amino acids.
+        Dictionaries, for coding and non-coding smORFS, are create with codons are keys and values the probability,
+        calculated by the count of codons divided by the count of amino acids
 
         Parameters
         ----------
@@ -556,6 +583,17 @@ class CodonBias:
 
     def score(self, sequence: str):
         """
+        Calculates the Codon Bias of a DNA sequence using pre-initialized dictionaries from labeled smORFs.
+        
+        Parameters
+        ----------
+        sequence : str
+            DNA sequence as string.
+
+        Return
+        ----------
+        float
+            Codon Bias score of the given sequence.
         """
 
         codonBias = 0.0
@@ -586,6 +624,9 @@ class CodonBias:
 
                 if codingPCodon == 0:
                     codingPCodon = 1e-9
+
+                if nonCodingPCodon == 0:
+                    nonCodingPCodon = 1e-9
 
                 codonBias += math.log(codingPCodon / nonCodingPCodon)
                 codonsCount += 1
