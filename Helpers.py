@@ -1,4 +1,5 @@
 import torch
+import math
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -483,6 +484,33 @@ def computeEpochROC(
     printEpochAUC(aucDict, epochIndex)
 
     return aucDict
+
+def computeEpochMCC(metrics: dict, epochIndex: int) -> float:
+    """
+    Calculates Mathews Correlation Coefficient at the end of an epoch.
+    MCC evaluates the models abillity to predict a class, especially in binary classification.
+
+    Parameters
+    ----------
+    metrics : dict
+        Contains all metrics caclulated for this epoch, along with confusion matrix TP,FP,FN, N.
+
+    Returns
+    ----------
+    dict
+        Returns calculated mcc in dictionary with key `mcc`.
+    """
+
+    tp = metrics.get("TP", None)
+    fp = metrics.get("FP", None)
+    fn = metrics.get("FN", None)
+    tn = metrics.get("TN", None)
+
+    mcc = (tp * tn) - (fp * fn) / math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+
+    mccDict = {"mcc": mcc}
+
+    return mccDict
 
 def kFoldSummary(foldMetrics: list) -> dict:
     """
