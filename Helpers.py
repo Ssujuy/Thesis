@@ -506,9 +506,11 @@ def computeEpochMCC(metrics: dict, epochIndex: int) -> float:
     fn = metrics.get("FN", None)
     tn = metrics.get("TN", None)
 
-    mcc = (tp * tn) - (fp * fn) / math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = ((tp * tn) - (fp * fn)) / math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
 
     mccDict = {"mcc": mcc}
+
+    printEpochMCC(mccDict, epochIndex)
 
     return mccDict
 
@@ -589,6 +591,20 @@ def printEpochAUC(auc: dict, epochIndex: int) -> None:
 
     auc = {k: v for k, v in auc.items() if k not in ("fpr", "tpr")}
     colourPrint(Types.Colours.WHITE, f"Epoch {epochIndex} AUC: {auc["auc"]}")
+
+def printEpochMCC(mcc: dict, epochIndex: int) -> None:
+    """
+    Prints epoch AUC.
+
+    Parameters
+    ----------
+    mcc : dict
+        Contains for per Epoch mcc metric.
+
+    epochIndex : int
+        Current epoch.
+    """
+    colourPrint(Types.Colours.WHITE, f"Epoch {epochIndex} MCC: {mcc["mcc"]}")
 
 def printFitSummary(trainingMetrics: dict, validationMetrics: dict) -> None:
     """

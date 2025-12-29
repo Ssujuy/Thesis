@@ -234,7 +234,7 @@ class SmORFCNN(nn.Module):
         predictInputPath: str,
         predictOutputPath: str,
         hiddenState: str                        = Types.HiddenState.BOTH,
-        dnabertDirectory: str                   = Types.DEFAULT_DNABER6_SAVE_DIRECTORY,
+        dnabertDirectory: str                   = Types.DEFAULT_DNABERT6_SAVE_DIRECTORY,
         saveModelPathDir: str                   = Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         multiGapKernel: bool                    = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL,
@@ -566,7 +566,7 @@ class SmORFCNN(nn.Module):
             predictInputPath            = config["predictInputPath"],
             predictOutputPath           = config["predictOutputPath"],
             hiddenState                 = hiddenState,
-            dnabertDirectory            = config.get("dnabertDirectory",              Types.DEFAULT_DNABER6_SAVE_DIRECTORY),
+            dnabertDirectory            = config.get("dnabertDirectory",              Types.DEFAULT_DNABERT6_SAVE_DIRECTORY),
             saveModelPathDir            = config.get("saveModelPathDir",              Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH),
             multiKernel                 = config.get("multiKernel",                   Types.DEFAULT_SMORFCNN_MULTI_KERNEL),
             multiGapKernel              = config.get("multiGapKernel",                Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL),
@@ -755,7 +755,8 @@ class SmORFCNN(nn.Module):
         if self.multiGapKernel:
             fusedDim += 2 * self.temporalHeadOutputChannels
 
-        return fusedDim
+        #return fusedDim
+        return 6912
 
     def _optimizerInit(self) -> torch.optim.Optimizer:
         """
@@ -863,14 +864,20 @@ class SmORFCNN(nn.Module):
         if self.multiKernel:
 
             inputMKCOneHot, maskMKC = self.multiKernelClass(inputMKCOneHot, maskOnehot)
-            inputMKCOneHot = self.multiKernelTemporalClass(inputMKCOneHot, maskMKC)
-            features.append(inputMKCOneHot)
+            # inputMKCOneHot = self.multiKernelTemporalClass(inputMKCOneHot, maskMKC)
+            gap = Helpers.globalAveragePooling(inputMKCOneHot, maskMKC)
+            gmp = Helpers.globalMaxPooling(inputMKCOneHot, maskMKC)
+            #features.append(inputMKCOneHot)
+            features.append(torch.cat([gap, gmp], dim=1))
 
         if self.multiGapKernel:
 
             inputMGKCOneHot, maskMGKC = self.multiGapKernelClass(inputMGKCOneHot, maskOnehot)
-            inputMGKCOneHot = self.multiGapKernelTemporalClass(inputMGKCOneHot, maskMGKC)
-            features.append(inputMGKCOneHot)
+            # inputMGKCOneHot = self.multiGapKernelTemporalClass(inputMGKCOneHot, maskMGKC)
+            gap = Helpers.globalAveragePooling(inputMGKCOneHot, maskMGKC)
+            gmp = Helpers.globalMaxPooling(inputMGKCOneHot, maskMGKC)
+            # features.append(inputMGKCOneHot)
+            features.append(torch.cat([gap, gmp], dim=1))
 
         if self.dnabertEmbeddings:
 
@@ -893,7 +900,7 @@ class SmORFCNN(nn.Module):
         if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
             self.forwardDebugCounter += 1
 
-        return logits.squeeze(-1) if self.classes == 1 else logits
+        return logits.squeeze(-1)
 
     def trainEpoch(self, epochIndex: int) -> dict:
         """
@@ -1042,6 +1049,8 @@ class SmORFCNN(nn.Module):
 
         metrics = metrics | Helpers.computeEpochROC(probabilities, targets, epochIndex)
 
+        metrics = metrics | Helpers.computeEpochMCC(metrics, epochIndex)
+
         return metrics
 
     @torch.no_grad()
@@ -1109,6 +1118,8 @@ class SmORFCNN(nn.Module):
 
         metrics = metrics | Helpers.computeEpochROC(probabilities, targets, 0)
 
+        metrics = metrics | Helpers.computeEpochMCC(metrics, 0)
+
         return metrics
 
     def fit(self, epochs: int):
@@ -1153,7 +1164,8 @@ class SmORFCNN(nn.Module):
             "FN": [],
             "auc": [],
             "fpr": [],
-            "tpr": []
+            "tpr": [],
+            "mcc": []
         }
 
         epochIter = tqdm(
@@ -1510,7 +1522,7 @@ class SmORFCNN(nn.Module):
             Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][{function} Epoch-{epochIndex}] End of epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)}")
             Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][{function} Epoch-{epochIndex}] End of epoch loss average={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=True)
+mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=False)
 # mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
 mymodel.initializeDataset()
 mymodel.fit(10)
