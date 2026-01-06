@@ -1405,11 +1405,14 @@ class SmORFCNN(nn.Module):
 
             xEmbed = self.dnabert6Class.embeddings([sequence])
 
+            xScores = self.compFeaturesClass.score([sequence])
+
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
+            xScores = xScores.to(self.device)
 
-            outputs = self(xOnehot, xEmbed, maskOnehot)
+            outputs = self(xScores, xEmbed, xOnehot, maskOnehot)
             probs = torch.sigmoid(outputs)
             preds = (probs >= self.threshold).to(torch.int8)
 
