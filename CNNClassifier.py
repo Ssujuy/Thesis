@@ -1423,7 +1423,6 @@ class SmORFCNN(nn.Module):
                     "label": int(pred)
                 })
 
-
         Helpers.colourPrint(Types.Colours.GREEN, f"Saving predictions to {self.predictOutputPath}")
         df = pd.DataFrame(results)
         df.to_csv(self.predictOutputPath, index=False)
