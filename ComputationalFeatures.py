@@ -20,7 +20,6 @@ class ComputationalFeatures:
     def score(self, sequences) -> list:
         batch_scores = []
 
-        # Iterate through the sequences
         for seq in sequences:
             s1 = self.hexamerScore.score(seq)
             s2 = self.ficketScore.score(seq)
@@ -29,5 +28,4 @@ class ComputationalFeatures:
             
             batch_scores.append([s1, s2, s3, s4])
 
-        # Convert efficiently to Tensor via numpy to ensure correct dtype
         return torch.tensor(np.array(batch_scores), dtype=torch.float32)

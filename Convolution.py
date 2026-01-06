@@ -10,8 +10,7 @@ import Types, Helpers
 
 class ConvolutionBlock(nn.Module):
     """
-    Constructs a basic Convolution Network with configurable parameters:\n
-    kernel, stride, padding, dilation, groups, activation and dropout
+    Constructs a basic Convolution Network with configurable parameters: kernel, stride, padding, dilation, groups, activation and dropout
 
     Attributes
     ----------
@@ -66,9 +65,9 @@ class ConvolutionBlock(nn.Module):
     Methods
     ----------
     forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
-        Passes input x through convolution, batch normalization, activation and dropout.\n
-        Then passes mask across the same convolution block and updates the mask, then\n
-        x is multiplied by the mask to mark padded positions so they dont produce features.\n
+        Passes input x through convolution, batch normalization, activation and dropout.
+        Then passes mask across the same convolution block and updates the mask.
+        Then, x is multiplied by the mask to mark padded positions so they dont produce features.
         Returns tuple of y, mask.
 
     print():
@@ -169,7 +168,7 @@ class ConvolutionBlock(nn.Module):
     @torch.no_grad()
     def _updateMask(self, mask: torch.Tensor) -> torch.Tensor:
         """
-        Passes mask tensor through convolution with kernel=maskKernel (1,1,1).\n
+        Passes mask tensor through convolution with kernel=maskKernel (1,1,1).
         Then uses convolution.eq to compare every element of convolution to the scalar self.kernel.
 
         Parameters
@@ -205,9 +204,8 @@ class ConvolutionBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Passes input x through convolution, batch normalization, activation and dropout.\n
-        Updates the mask of input x then multiplies the output after convolution with mask\n
-        and multiply again the output after activation and dropout.\n
+        Passes input x through convolution, batch normalization, activation and dropout.
+        Updates the mask of input x then multiplies the output after convolution with mask and multiply again the output after activation and dropout.
         Returns a Tensor with the output of size outputChannels and mask with 1 as positions without pad.
 
         Parameters
@@ -263,7 +261,7 @@ class ConvolutionBlock(nn.Module):
 
     def _debugIn(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
-        Prints debug information for input shape and type in forward.\n
+        Prints debug information for input shape and type in forward.
         Prints will occur until limit is reached and debugMode is True.
 
         Parameters
@@ -284,7 +282,7 @@ class ConvolutionBlock(nn.Module):
 
     def _debugOut(self, x: torch.Tensor, mask: torch.Tensor) -> None:
         """
-        Prints debug information for output shape in forward.\n
+        Prints debug information for output shape in forward.
         Prints will occur until limit is reached and debugMode is True.
 
         Parameters

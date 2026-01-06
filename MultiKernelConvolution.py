@@ -65,9 +65,9 @@ class MultiKernelConvolution(nn.Module):
     Methods
     ----------
     forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
-        Compute convolution with different kernel widths. Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).\n
-        Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.\n
-        Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.\n
+        Compute convolution with different kernel widths. Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).
+        Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.
+        Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.s
         Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min)
 
     print():
@@ -171,9 +171,9 @@ class MultiKernelConvolution(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute convolution with different kernel widths. Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).\n
-        Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.\n
-        Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.\n
+        Compute convolution with different kernel widths. Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).
+        Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.
+        Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.
         Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min).
 
         Parameters
@@ -235,7 +235,7 @@ class MultiKernelConvolution(nn.Module):
     
     def _debugIn(self, x: torch.Tensor, mask: torch.Tensor):
         """
-        Prints shape of input Tensor in forward and mask.\n
+        Prints shape of input Tensor in forward and mask.
         Prints will occur until limit is reached and debugMode is True.
 
         Parameters
@@ -256,7 +256,7 @@ class MultiKernelConvolution(nn.Module):
 
     def _debugBranch(self, b: torch.Tensor, m: torch.Tensor):
         """
-        Prints shape of each branche's Tensor in forward.\n
+        Prints shape of each branche's Tensor in forward.
         Prints will occur until limit is reached and debugMode is True.
         
         Parameters
@@ -277,7 +277,7 @@ class MultiKernelConvolution(nn.Module):
 
     def _debugOut(self, out: torch.Tensor, m: torch.Tensor) -> None:
         """
-        Prints shape of output Tensor in forward.\n
+        Prints shape of output Tensor in forward.
         Prints will occur until limit is reached and debugMode is True.
 
         Parameters

@@ -966,7 +966,7 @@ class SmORFCNN(nn.Module):
         Return
         ----------
         dict
-            Dictionary of all epoch metrics during triaing ("acc", "loss", precision, etc.).
+            Dictionary of all epoch metrics during training ("acc", "loss", precision, etc.).
         """
         self.train()
 
