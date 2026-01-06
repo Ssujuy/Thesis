@@ -12,8 +12,8 @@ import Types, Helpers
 from dataRead import fastaToList
 from MultiKernelConvolution import MultiKernelConvolution
 from MultiGapKernelConvolution import MultiGapKernelConvolution
-from TemporalHead import TemporalHead
 from dnabert6 import DNABERT6
+from ComputationalFeatures import ComputationalFeatures
 
 # ---------------------------------------------
 # The CNNClassifier for smORFs
@@ -21,13 +21,16 @@ from dnabert6 import DNABERT6
 
 class SmORFCNN(nn.Module):
     """
-    Multi branch Classifier that takes dnabert 6 embeddings, CLS embeddings and mean embeddings of size [B,1536,1].\n
-    Uses onehot encoded sequences of size [B, 4, 512] that are passed through a Multi Kernel Convolution and then are\n
-    concatenated creating [B, C_out * len(kernelList), L_min]. The features from Multi Kernel are passed to Temporal Head,\n
-    which reduces the feature's size [B, reduces, 498] then passes them through residual mapping 2 residual blocks and computes\n
-    Global Average Pooling and Global Max Pooling [B, C_out * 2].
+    Multi branch Classifier that predicts coding and non-coding smORF DNA sequences.
+    DNABERT-6 branch that produces embeddings features, depending on hidden state (CLS, MEAN or BOTH).
+    Uses onehot encoded sequences of size [B, 4, 512] for the Convolution feature extraction branches.    
+    Multiple Kernel Convolution branch uses a list of kernel widths to extract features from the 1hot encoded DNA sequences.
+    Multiple Gapped Kernel Convolution uses a list of kernel widths along with a list of gaps to extract features from the 1hot encoded DNA sequences.
+    Computational Features branch uses Hexamer Score, Fickett Score, Codon Bias and Nucleotide Bias to extract features.
 
-    
+    In order to create a balance between the sizes of features, all the features were reduced to 256.
+    Finally, the features are passed to a classifer to determine coding potential.
+
     Attributes
     ----------
     forwardDebugLimit : int
@@ -46,17 +49,23 @@ class SmORFCNN(nn.Module):
         Size of dnabert6 embeddings.
 
     trainPath: str
-        Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
+        Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors.
         for valid=1, padded=0 positions and dnabert6 embeddings
 
     saveModelPathDir : str
         Directory to save the trained model and configuration.
-
-    temporalHead : bool
-        Activates Temporal Head Block.
     
     multikernel : bool
-        Activates Multi Kernel Block.
+        Activates Multiple Kernel Convolution branch for feature extraction.
+
+    multiGapKernel : bool
+        Activates Multiple Gap Kernel Convolution branch for feature extraction.
+
+    dnabertEmbeddings : bool
+        Activates DNABERT-6 branch for embeddings feature extraction.
+
+    computationalFeatures : bool
+        Activates computational branch for feature extraction.
 
     multiKernelList : list
         List of different kernel sizes for Multi Kernel Convolution.
@@ -73,12 +82,18 @@ class SmORFCNN(nn.Module):
     outputChannelsPerGapKernel : int
         Size of C_out, output channels per gap kernel convolution block.
 
-    temporalHeadOutputChannels : int
-        Size of C_out, output channels of temporal head block (* 2).
+    dnabertReductionSize : int
+        Size of dnabert6 embeddings after reduction.
 
-    residualBlocks : int
-        Number of residual blocks used in Temporal head.
+    mkcReductionSize : int
+        Size of Multiple Kernel Convolution features after reduction.
 
+    mgkcReductionSize : int
+        Size of Multiple Gap Kernel Convolution features after reduction.
+
+    compFeaturesIncreaseSize : int
+        Size of computational features after increase.
+    
     classes : int
         Number of classes produced at the end of classifier.
 
@@ -103,8 +118,8 @@ class SmORFCNN(nn.Module):
     schedulerFactor : float
         Factor parameter passed in scheduler.
     
-    schedulerWarmup : float
-        Warmup parameter passed in scheduler.
+    schedulerPatience : int
+        Patience parameter passed in scheduler.
     
     threshold : float
         threshold used to differentiate negative from positive smORFs, from sigmoid probs.
@@ -145,66 +160,62 @@ class SmORFCNN(nn.Module):
     Methods
     ----------
     _initializeEnvironment() -> None:
-        Sets environment config for deterministic algorithm (helps with reproducibillity),\n
+        Sets environment config for deterministic algorithm (helps with reproducibillity).
         Sets seed and random seed with model's seed.
     
     _calculateFeaturesDim(self) -> int:
         Calculates total features dim, which is the classifier's input channel, based on active branches.
     
     optimizerInit(self) -> torch.optim.Optimizer:
-        Initializes AdamW optimizer, adds weight decay to weight kernels\n
-        and removes it from norms and biases.
+        Initializes AdamW optimizer, adds weight decay to weight kernels and removes it from norms and biases.
 
     _schedulerInit(self) -> torch.optim.lr_scheduler:
         Initializes sequential Learning rate schedulers, with warmpup LinearLR and cosine CosineAnnealingLR.
 
     initializeDataset() -> None:
-        Uses Helpers function loadFeaturesFromPt in order to load all tensors from pyTorch file in a TensorDataset.\n
-        Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
+        Uses Helpers function loadFeaturesFromPt in order to load all tensors from pyTorch file in a TensorDataset.
+        Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.
         Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
     
-    forward(xOnehot: Tensor, xEmbeddings: Tensor, maskOnehot: Tensor) -> Tensor:
-        Takes dnabert6 embeddings and appends them to features list.\n
-        Passes onehot encoded sequences ([B,4,512]) along with their mask through ([B,512,1]) through Multiple Kernel Convolution,\n
-        then through Temporal Head and appends them to the features list as well.\n
-        Finally, creates a features tensor with all features drawn from all branches and passes them to the classifer.\n
+    forward(xScores: torch.Tensor, xEmbeddings: torch.Tensor, xOnehot: torch.Tensor, maskOnehot: torch.Tensor) -> torch.Tensor
+        Takes 4 Tensor input arguments: xScore is the computational features, xEmbeddings is the dnabert6 embedddings, xOnehot is the onehot encoded dna sequence and maskOnehot is the mask. 
+        Passes onehot encoded sequences ([B,4,512]) along with their mask through ([B,512,1]) through Multiple Kernel Convolution and Multiple Gapped Kernel Convolution.
+        Finally, creates a features tensor with all features drawn from all branches and passes them to the classifer.
         Logits are returned.
 
 
     trainEpoch(epochIndex: int) -> dict:
-        Sets the model to training mode with self.train(), initializes loss function BCEWithLogits.\n
-        Iterates the trainingDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
-        Then, computes probabillities and loss, calls back propagation, clips grad norm and uses optimizer and scheduler step.\n
+        Sets the model to training mode with self.train(), initializes loss function BCEWithLogits.
+        Iterates the trainingDataLoader and for each batch, moves inputs to device and uses model's forward function.
+        Then, computes probabillities and loss, calls back propagation, clips grad norm and uses optimizer and scheduler step.
         Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.).
 
     validateEpoch(epochIndex: int) -> dict:
-        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
-        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
-        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n
-        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
 
 
     test() -> dict:
-        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
-        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
-        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n 
-        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
 
     fit(epochs: int):
-        Moves model to device, initializes scheduler and keeps dictionaries for training and validation metrics.\n
-        For each epoch trainEpoch and validateEpoch functions are called, their metrics are saved, along with lr and best state.\n
+        Moves model to device, initializes scheduler and keeps dictionaries for training and validation metrics.
+        For each epoch trainEpoch and validateEpoch functions are called, their metrics are saved, along with lr and best state.
         Finally after the epochs are finished test function is called to test the model and curves for acc,loss,f1 and auc are printed.
 
     kFoldCrossValidation()
 
     predict()
-        Reads sequences from FASTA file and converts them to a list.\n
-        For each sequence create 1hot encoded sequence, mask and dnabert6 embeddings.\n
-        Pass the tensor through forward and find the label based on the probabillity from sigmoid.\n
-        Finally create a csv file with all the sequences, labels and probibillities.\n
+        Reads sequences from FASTA file and converts them to a list.
+        For each sequence create 1hot encoded sequence, mask and dnabert6 embeddings.
+        Pass the tensor through forward and find the label based on the probabillity from sigmoid.
+        Finally create a csv file with all the sequences, labels and probibillities.
 
-        FASTA file loaded from class atribute's: `predictInputPath`.\n
-        Csv file saved to class atribute path: `predictOutputPath`.\n
+        FASTA file loaded from class atribute's: `predictInputPath`.
+        Csv file saved to class atribute path: `predictOutputPath`.
 
         Finally, prints a count of coding vs non-coding labels and a percentage, based on the total sequences.
 
@@ -215,15 +226,15 @@ class SmORFCNN(nn.Module):
         Prints initial member variables of the model and total parameters.
 
     _debugIn(xOnehot : Tensor, xEmbeddings : Tensor, maskOnehot : Tensor):
-        Prints model's forward input shapes and dtypes for xOnehot, maskOnehot and xEmbeddings.\n
+        Prints model's forward input shapes and dtypes for xOnehot, maskOnehot and xEmbeddings.
         Prints will occur until limit is reached and debugMode is True.
 
     debugLogits(self, logits : Tensor):
-        Prints logits shape and a small sample.\n
+        Prints logits shape and a small sample.
         Prints will occur until limit is reached and debugMode is True.
 
     def _debugFinal(probabilities : Tensor, targets : Tensor, runningLoss : float, n : int, function : str, epochIndex : int)
-        Prints final stats at the end of epoch. Prints shape of probabillities and targets.\n
+        Prints final stats at the end of epoch. Prints shape of probabillities and targets.
         Prints epoch's loss. Prints will occur only for first epoch.
     """
     def __init__(
@@ -239,13 +250,16 @@ class SmORFCNN(nn.Module):
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         multiGapKernel: bool                    = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL,
         dnabertEmbeddings: bool                 = Types.DEFAULT_SMORFCNN_DNABERT,
+        computationalFeatures: bool             = Types.DEFAULT_SMORFCNN_COMPUTATIONAL_FEATURES,
         multiKernelList: list                   = Types.DEFAULT_SMORFCNN_MULTI_KERNEL_LIST,
         multiGapKernelList: list                = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_LIST,
         multiGapKernelGapList: list             = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_GAP_LIST,
         outputChannelsPerKernel: int            = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
         outputChannelsPerGapKernel: int         = Types.DEFAULT_MULTI_GAP_KERNEL_OUTPUT,
-        temporalHeadOutputChannels: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL,
-        residualBlocks: int                     = Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS,
+        dnabertReductionSize: int               = Types.DEFAULT_SMORFCNN_DNABERT_REDUCTION_SIZE,
+        mkcReductionSize: int                   = Types.DEFAULT_SMORFCNN_MKC_REDUCTION_SIZE,
+        mgkcReductionSize: int                  = Types.DEFAULT_SMORFCNN_MGKC_REDUCTION_SIZE,
+        compFeaturesIncreaseSize: int           = Types.DEFAULT_SMORFCNN_SCALAR_INCREASE_SIZE,
         classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
         layer1Output: int                       = Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT,
         layer2Output: int                       = Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_OUTPUT,
@@ -254,7 +268,7 @@ class SmORFCNN(nn.Module):
         weightDecay: float                      = Types.DEFAULT_SMORFCNN_WEIGHT_DECAY,
         minLearningRate: float                  = Types.DEFAULT_SMORFCNN_MINIMUM_LEARNING_RATE,
         schedulerFactor: float                  = Types.DEFAULT_SMORFCNN_SCHEDULER_FACTOR,
-        schedulerWarmup: float                  = Types.DEFAULT_SMORFCNN_SCHEDULER_WARMUP,
+        schedulerPatience: int                  = Types.DEFAULT_SMORFCNN_SCHEDULER_PATIENCE,
         threshold: float                        = Types.DEFAULT_SMORFCNN_THRESHOLD,
         maxGradNorm: float                      = Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM,
         seed: int                               = Types.DEFAULT_SMORFCNN_SEED,
@@ -271,7 +285,7 @@ class SmORFCNN(nn.Module):
         forwardDebugLimit: int                  = Types.DEFAULT_FORWARD_DEBUG_LIMIT
     ):
         """
-        Constructs the complete smORF Classifier, using multi branched Multiple Kernel Convolution and DNABERT6 embeddings.\n
+        Constructs the complete smORF Classifier, using multi branched Multiple Kernel Convolution and DNABERT6 embeddings.
         Also, initializes model's parameters and the final 2-layer classifier.
 
         Parameters
@@ -283,17 +297,23 @@ class SmORFCNN(nn.Module):
             Size of dnabert6 embeddings.
 
         trainPath: str
-            Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors\n
-            for valid=1, padded=0 positions and dnabert6 embeddings
+            Path to pyTorch file storing onehot encoded sequences as Tensors [B,4,Length], masked Tensors.
+            For valid=1, padded=0 positions and dnabert6 embeddings
 
         saveModelPathDir : str
             Directory to save the trained model and configuration.
 
-        temporalHead : bool
-            Activates Temporal Head Block.
-        
         multikernel : bool
-            Activates Multi Kernel Block.
+            Activates Multiple Kernel Convolution branch for feature extraction.
+
+        multiGapKernel : bool
+            Activates Multiple Gap Kernel Convolution branch for feature extraction.
+
+        dnabertEmbeddings : bool
+            Activates DNABERT-6 branch for embeddings feature extraction.
+
+        computationalFeatures : bool
+            Activates computational branch for feature extraction.
 
         multiKernelList : list
             List of different kernel sizes for Multi Kernel Convolution.
@@ -310,11 +330,17 @@ class SmORFCNN(nn.Module):
         outputChannelsPerGapKernel : int
             Size of C_out, output channels per gap kernel convolution block.
 
-        temporalHeadOutputChannels : int
-            Size of C_out, output channels of temporal head block (* 2).
+        dnabertReductionSize : int
+            Size of dnabert6 embeddings after reduction.
 
-        residualBlocks : int
-            Number of residual blocks used in Temporal head.
+        mkcReductionSize : int
+            Size of Multiple Kernel Convolution features after reduction.
+
+        mgkcReductionSize : int
+            Size of Multiple Gap Kernel Convolution features after reduction.
+
+        compFeaturesIncreaseSize : int
+            Size of computational features after increase.
 
         classes : int
             Number of classes produced at the end of classifier.
@@ -340,8 +366,8 @@ class SmORFCNN(nn.Module):
         schedulerFactor : float
             Factor parameter passed in scheduler.
         
-        schedulerWarmup : float
-            Warmup parameter passed in scheduler.
+        schedulerPatience : int
+            Patience parameter passed in scheduler.
         
         threshold : float
             threshold used to differentiate negative from positive smORFs, from sigmoid probs.
@@ -413,13 +439,16 @@ class SmORFCNN(nn.Module):
         self.multiKernel = multiKernel
         self.multiGapKernel = multiGapKernel
         self.dnabertEmbeddings = dnabertEmbeddings
+        self.computationalFeatures = computationalFeatures
         self.multiKernelList = multiKernelList
         self.multiGapKernelList = multiGapKernelList
         self.multiGapKernelGapList = multiGapKernelGapList
         self.outputChannelsPerKernel = outputChannelsPerKernel
         self.outputChannelsPerGapKernel = outputChannelsPerGapKernel
-        self.temporalHeadOutputChannels = temporalHeadOutputChannels
-        self.residualBlocks = residualBlocks
+        self.dnabertReductionSize = dnabertReductionSize
+        self.mkcReductionSize = mkcReductionSize
+        self.mgkcReductionSize = mgkcReductionSize
+        self.compFeaturesIncreaseSize = compFeaturesIncreaseSize
         self.layer1Output = layer1Output
         self.layer2Output = layer2Output
         self.classifierDropout = classifierDropout
@@ -430,7 +459,7 @@ class SmORFCNN(nn.Module):
         self.betas = Types.DEFAULT_SMORFCNN_BETAS
         self.minLearningRate = minLearningRate
         self.schedulerFactor = schedulerFactor
-        self.schedulerWarmpup = schedulerWarmup
+        self.schedulerPatience = schedulerPatience
         self.threshold = threshold
         self.maxGradNorm = maxGradNorm
         self.trainBatchSize = trainBatchSize
@@ -442,14 +471,27 @@ class SmORFCNN(nn.Module):
         self.epochs = epochs
 
         self.dnabert6Class = None
+        self.dnabert6Reduction = None
+
         self.multiKernelClass = None
-        self.multiKernelTemporalClass = None
+        self.multipleKernelReduction = None
+
         self.multiGapKernelClass = None
-        self.multiGapKernelTemporalClass = None
+        self.multiGapKernelReduction = None
+
+        self.compFeaturesClass = None
+        self.compFeaturesIncrease = None
 
         if self.dnabertEmbeddings:
             self.dnabert6Class = DNABERT6(hiddenState=self.dnabertHiddenState)
             self.dnabert6Class.load(self.dnabertDirectory)
+
+            self.dnabert6Reduction = nn.Sequential(
+                nn.Linear(self.embeddingsInputChannels, self.dnabertReductionSize),
+                nn.BatchNorm1d(self.dnabertReductionSize),
+                nn.GELU(),
+                nn.Dropout(self.classifierDropout)
+            )
 
         if self.multiKernel:
             self.multiKernelClass = MultiKernelConvolution(
@@ -460,12 +502,11 @@ class SmORFCNN(nn.Module):
                 forwardDebugLimit=self.forwardDebugLimit
             )
 
-            self.multiKernelTemporalClass = TemporalHead(
-                self.multiKernelClass.outputChannels,
-                hiddenChannels=self.temporalHeadOutputChannels,
-                residualBlocks=self.residualBlocks,
-                debug=self.debugMode,
-                forwardDebugLimit=self.forwardDebugLimit
+            self.multipleKernelReduction = nn.Sequential(
+                nn.Linear(self.multiKernelClass.outputChannels * 2, self.mkcReductionSize),
+                nn.BatchNorm1d(self.mkcReductionSize),
+                nn.GELU(),
+                nn.Dropout(self.classifierDropout)
             )
 
         if self.multiGapKernel:
@@ -478,13 +519,21 @@ class SmORFCNN(nn.Module):
                 forwardDebugLimit=self.forwardDebugLimit
             )
 
-            self.multiGapKernelTemporalClass = TemporalHead(
-                self.multiGapKernelClass.outputChannels,
-                hiddenChannels=self.temporalHeadOutputChannels,
-                residualBlocks=self.residualBlocks,
-                debug=self.debugMode,
-                forwardDebugLimit=self.forwardDebugLimit
+            self.multiGapKernelReduction = nn.Sequential(
+                nn.Linear(self.multiGapKernelClass.outputChannels * 2, self.mgkcReductionSize),
+                nn.BatchNorm1d(self.mgkcReductionSize),
+                nn.GELU(),
+                nn.Dropout(self.classifierDropout)
             )
+        
+        if self.computationalFeatures:
+            self.compFeaturesClass = ComputationalFeatures(self.trainPath)
+            self.compFeaturesIncrease = nn.Sequential(
+                    nn.Linear(self.compFeaturesClass.input, self.compFeaturesIncreaseSize),
+                    nn.BatchNorm1d(self.compFeaturesIncreaseSize),
+                    nn.GELU(),
+                    nn.Dropout(self.classifierDropout),
+                )
 
         self.featuresDim = self._calculateFeaturesDim()
 
@@ -517,7 +566,7 @@ class SmORFCNN(nn.Module):
     @classmethod
     def fromJson(cls, path: str) -> "SmORFCNN":
         """
-        Read JSON config file from configPath file path, initialize and the SmORFCNN model.\n
+        Read JSON config file from configPath file path, initialize and the SmORFCNN model.
         Using @classmethod, cls can be used as self for SmORFCNN class.
 
         Parameters
@@ -571,13 +620,16 @@ class SmORFCNN(nn.Module):
             multiKernel                 = config.get("multiKernel",                   Types.DEFAULT_SMORFCNN_MULTI_KERNEL),
             multiGapKernel              = config.get("multiGapKernel",                Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL),
             dnabertEmbeddings           = config.get("dnabertEmbeddings",             Types.DEFAULT_SMORFCNN_DNABERT),
+            computationalFeatures       = config.get("computationalFeatures",         Types.DEFAULT_SMORFCNN_COMPUTATIONAL_FEATURES),
             multiKernelList             = config.get("multiKernelList",               Types.DEFAULT_SMORFCNN_MULTI_KERNEL_LIST),
             multiGapKernelList          = config.get("multiGapKernelList",            Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_LIST),
             multiGapKernelGapList       = config.get("multiGapKernelGapList",         Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_GAP_LIST),
             outputChannelsPerKernel     = config.get("outputChannelsPerKernel",       Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL),
             outputChannelsPerGapKernel  = config.get("outputChannelsPerGapKernel",    Types.DEFAULT_MULTI_GAP_KERNEL_OUTPUT),
-            temporalHeadOutputChannels  = config.get("temporalHeadOutputChannels",    Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_TEMPORAL),
-            residualBlocks              = config.get("residualBlocks",                Types.DEFAULT_SMORFCNN_RESIDUAL_BLOCKS),
+            dnabertReductionSize        = config.get("dnabertReductionSize",          Types.DEFAULT_SMORFCNN_DNABERT_REDUCTION_SIZE),
+            mkcReductionSize            = config.get("mkcReductionSize",              Types.DEFAULT_SMORFCNN_MKC_REDUCTION_SIZE),
+            mgkcReductionSize           = config.get("mgkcReductionSize",             Types.DEFAULT_SMORFCNN_MGKC_REDUCTION_SIZE),
+            compFeaturesIncreaseSize    = config.get("compFeaturesIncreaseSize",      Types.DEFAULT_SMORFCNN_SCALAR_INCREASE_SIZE),
             classes                     = config.get("classes",                       Types.DEFAULT_SMORFCNN_CLASSES),
             layer1Output                = config.get("layer1Output",                  Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT),
             layer2Output                = config.get("layer2Output",                  Types.DEFAULT_SMORFCNN_CLASSIFIER_L2_OUTPUT),
@@ -586,7 +638,7 @@ class SmORFCNN(nn.Module):
             weightDecay                 = config.get("weightDecay",                   Types.DEFAULT_SMORFCNN_WEIGHT_DECAY),
             minLearningRate             = config.get("minLearningRate",               Types.DEFAULT_SMORFCNN_MINIMUM_LEARNING_RATE),
             schedulerFactor             = config.get("schedulerFactor",               Types.DEFAULT_SMORFCNN_SCHEDULER_FACTOR),
-            schedulerWarmup             = config.get("schedulerWarmup",               Types.DEFAULT_SMORFCNN_SCHEDULER_WARMUP),
+            schedulerPatience           = config.get("schedulerPatience",             Types.DEFAULT_SMORFCNN_SCHEDULER_PATIENCE),
             threshold                   = config.get("threshold",                     Types.DEFAULT_SMORFCNN_THRESHOLD),
             maxGradNorm                 = config.get("maxGradNorm",                   Types.DEFAULT_SMORFCNN_MAX_GRAD_NORM),
             seed                        = config.get("seed",                          Types.DEFAULT_SMORFCNN_SEED),
@@ -635,13 +687,16 @@ class SmORFCNN(nn.Module):
             "multiKernel":                self.multiKernel,
             "multiGapKernel":             self.multiGapKernel,
             "dnabertEmbeddings":          self.dnabertEmbeddings,
+            "computationalFeatures":      self.computationalFeatures,
             "multiKernelList":            self.multiKernelList,
             "multiGapKernelList":         self.multiGapKernelList,
             "multiGapKernelGapList":      self.multiGapKernelGapList,
             "outputChannelsPerKernel":    self.outputChannelsPerKernel,
             "outputChannelsPerGapKernel": self.outputChannelsPerGapKernel,
-            "temporalHeadOutputChannels": self.temporalHeadOutputChannels,
-            "residualBlocks":             self.residualBlocks,
+            "dnabertReductionSize":       self.dnabertReductionSize,
+            "mkcReductionSize":           self.mkcReductionSize,
+            "mgkcReductionSize":          self.mgkcReductionSize,
+            "compFeaturesIncreaseSize":   self.compFeaturesIncreaseSize,
             "classes":                    self.classes,
             "layer1Output":               self.layer1Output,
             "layer2Output":               self.layer2Output,
@@ -650,7 +705,7 @@ class SmORFCNN(nn.Module):
             "weightDecay":                self.weightDecay,
             "minLearningRate":            self.minLearningRate,
             "schedulerFactor":            self.schedulerFactor,
-            "schedulerWarmup":            self.schedulerWarmpup,
+            "schedulerPatience":          self.schedulerPatience,
             "threshold":                  self.threshold,
             "maxGradNorm":                self.maxGradNorm,
             "seed":                       self.seed,
@@ -685,7 +740,7 @@ class SmORFCNN(nn.Module):
 
     def _initializeEnvironment(self) -> None:
         """
-        Sets environment config for deterministic algorithm (helps with reproducibillity),\n
+        Sets environment config for deterministic algorithm (helps with reproducibillity).
         Sets seed and random seed with model's seed.
         """
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -709,8 +764,8 @@ class SmORFCNN(nn.Module):
 
     def initializeDataset(self) -> None:
         """
-        Uses Helpers function loadFeaturesFromPt in order to load all tensors from pyTorch file in a TensorDataset.\n
-        Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.\n
+        Uses Helpers function loadFeaturesFromPt in order to load all tensors from pyTorch file in a TensorDataset.
+        Then, uses Helpers toDataLoaders function, in order to split the Dataset in training, validation and testing DataLoaders.
         Finally prints some minor information for its split and a label distribution for each DataLoader and sum.
         """
 
@@ -737,7 +792,8 @@ class SmORFCNN(nn.Module):
 
     def _calculateFeaturesDim(self) -> int:
         """
-        Calculates total features dim, which is the classifier's input channel, based on active branches.
+        Calculates total features dim, which is the classifier's input channel, based on active features extraction branches.
+        DNABERT branch output + MKC branch output + MGKC branch output + computational branch output.
         
         Return
         ----------
@@ -747,21 +803,22 @@ class SmORFCNN(nn.Module):
         fusedDim = 0
 
         if self.dnabertEmbeddings:
-            fusedDim += self.embeddingsInputChannels
+            fusedDim += self.dnabertReductionSize
         
         if self.multiKernel:
-            fusedDim += 2 * self.temporalHeadOutputChannels
+            fusedDim += self.mkcReductionSize
         
         if self.multiGapKernel:
-            fusedDim += 2 * self.temporalHeadOutputChannels
+            fusedDim += self.mgkcReductionSize
 
-        #return fusedDim
-        return 6912
+        if self.computationalFeatures:
+            fusedDim += self.compFeaturesIncreaseSize
+
+        return fusedDim
 
     def _optimizerInit(self) -> torch.optim.Optimizer:
         """
-        Initializes AdamW optimizer, adds weight decay to weight kernels\n
-        and removes it from norms and biases.
+        Initializes AdamW optimizer, adds weight decay to weight kernels and removes it from norms and biases.
 
         Return
         ----------
@@ -786,58 +843,38 @@ class SmORFCNN(nn.Module):
 
     def _schedulerInit(self) -> torch.optim.lr_scheduler:
         """
-        Initializes sequential Learning rate scheduler, with warmpup LinearLR and cosine CosineAnnealingLR.\n
+        Initializes Learning Rate scheduler Reduce LR on plateau.
 
         Return
         ----------
         torch.optim.lr_scheduler
-            Sequential Learning Rate scheduler.
+            Learning Rate scheduler Reduce LR on plateau.
         """
 
-        warmupEpochs  = int(round(self.schedulerWarmpup * self.epochs))
-        cosineEpochs  = self.epochs - warmupEpochs
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, 
+                mode='min', 
+                factor=self.schedulerFactor, 
+                patience=self.schedulerPatience, 
+            )
 
-        schedulers = []
-        milestones = []
-
-        warmup = lrScheduler.LinearLR(
-            self.optimizer,
-            start_factor=self.schedulerFactor,
-            total_iters=warmupEpochs
-        )
-
-        schedulers.append(warmup)
-        milestones.append(warmupEpochs)
-
-        cosine = lrScheduler.CosineAnnealingLR(
-            self.optimizer,
-            T_max=cosineEpochs,
-            eta_min=self.minLearningRate
-        )
-
-        schedulers.append(cosine)
-
-        return lrScheduler.SequentialLR(
-            self.optimizer,
-            schedulers=schedulers,
-            milestones=milestones
-        )
-
-    def forward(self, xOnehot: torch.Tensor, xEmbeddings:  torch.Tensor, maskOnehot: torch.Tensor) -> torch.Tensor:
+    def forward(self, xScores: torch.Tensor, xEmbeddings: torch.Tensor, xOnehot: torch.Tensor, maskOnehot: torch.Tensor) -> torch.Tensor:
         """
-        Takes dnabert6 embeddings and appends them to features list.\n
-        Passes onehot encoded sequences ([B,4,512]) along with their mask through ([B,512,1]) through Multiple Kernel Convolution,\n
-        then through Temporal Head and appends them to the features list as well.\n
-        Finally, creates a features tensor with all features drawn from all branches and passes them to the classifer.\n
+        Takes 4 Tensor input arguments: xScore is the computational features, xEmbeddings is the dnabert6 embedddings, xOnehot is the onehot encoded dna sequence and maskOnehot is the mask. 
+        Passes onehot encoded sequences ([B,4,512]) along with their mask through ([B,512,1]) through Multiple Kernel Convolution and Multiple Gapped Kernel Convolution.
+        Finally, creates a features tensor with all features drawn from all branches and passes them to the classifer.
         Logits are returned.
 
         Parameters
         ----------
-        xOnehot : Tensor
-            Onehot encoded sequences of shape [B,4,512].
-
+        xScores : Tensor
+            Computational Features Tensor [B,4]
+        
         xEmbeddings : Tensor
             DNABERT6 embeddings of shape [B,1536,1].
+
+        xOnehot : Tensor
+            Onehot encoded sequences of shape [B,4,512].
 
         maskOnehot : Tensor
             Mask used to differentiate valid from padded positions, shape [B,512,1].
@@ -854,6 +891,7 @@ class SmORFCNN(nn.Module):
         inputMKCOneHot = xOnehot
         inputMGKCOneHot = xOnehot
         inputEmbeddings = xEmbeddings
+        inputScores = xScores
 
         if xOnehot is None:
             raise AttributeError("Did not receive onehot encoded input!")
@@ -864,24 +902,35 @@ class SmORFCNN(nn.Module):
         if self.multiKernel:
 
             inputMKCOneHot, maskMKC = self.multiKernelClass(inputMKCOneHot, maskOnehot)
-            # inputMKCOneHot = self.multiKernelTemporalClass(inputMKCOneHot, maskMKC)
+
             gap = Helpers.globalAveragePooling(inputMKCOneHot, maskMKC)
             gmp = Helpers.globalMaxPooling(inputMKCOneHot, maskMKC)
-            #features.append(inputMKCOneHot)
-            features.append(torch.cat([gap, gmp], dim=1))
+
+            reduction = self.multipleKernelReduction(torch.cat([gap, gmp], dim=1))
+
+            features.append(reduction)
 
         if self.multiGapKernel:
 
             inputMGKCOneHot, maskMGKC = self.multiGapKernelClass(inputMGKCOneHot, maskOnehot)
-            # inputMGKCOneHot = self.multiGapKernelTemporalClass(inputMGKCOneHot, maskMGKC)
+
             gap = Helpers.globalAveragePooling(inputMGKCOneHot, maskMGKC)
             gmp = Helpers.globalMaxPooling(inputMGKCOneHot, maskMGKC)
-            # features.append(inputMGKCOneHot)
-            features.append(torch.cat([gap, gmp], dim=1))
+
+            reduction = self.multiGapKernelReduction(torch.cat([gap, gmp], dim=1))
+
+            features.append(reduction)
 
         if self.dnabertEmbeddings:
 
-            features.append(inputEmbeddings.squeeze(-1))
+            reduction = self.dnabert6Reduction(inputEmbeddings.squeeze(-1))
+
+            features.append(reduction)
+
+        if self.computationalFeatures:
+
+            increase = self.compFeaturesIncrease(inputScores)
+            features.append(increase)
 
         if not features:
             raise RuntimeError("Failed to produce any features!")
@@ -904,9 +953,9 @@ class SmORFCNN(nn.Module):
 
     def trainEpoch(self, epochIndex: int) -> dict:
         """
-        Sets the model to training mode with self.train(), initializes loss function BCEWithLogits.\n
-        Iterates the trainingDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
-        Then, computes probabillities and loss, calls back propagation, clips grad norm and uses optimizer and scheduler step.\n
+        Sets the model to training mode with self.train(), initializes loss function BCEWithLogits.
+        Iterates the trainingDataLoader and for each batch, moves inputs to device and uses model's forward function.
+        Then, computes probabillities and loss, calls back propagation, clips grad norm and uses optimizer and scheduler step.
         Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.).
 
         Parameters
@@ -946,14 +995,17 @@ class SmORFCNN(nn.Module):
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
 
+            xScores = self.compFeaturesClass.score(sequences)
+
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
+            xScores = xScores.to(self.device)
             y = y.to(self.device)
 
             self.optimizer.zero_grad()
 
-            outputs = self(xOnehot, xEmbed, maskOnehot)
+            outputs = self(xScores, xEmbed, xOnehot, maskOnehot)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -982,10 +1034,9 @@ class SmORFCNN(nn.Module):
     @torch.no_grad()
     def validateEpoch(self, epochIndex: int) -> dict:
         """
-        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
-        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
-        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n
-        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.).
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.).
 
         Parameters
         ----------
@@ -1021,12 +1072,15 @@ class SmORFCNN(nn.Module):
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
 
+            xScores = self.compFeaturesClass.score(sequences)
+
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
+            xScores = xScores.to(self.device)
             y = y.to(self.device)
 
-            outputs = self(xOnehot, xEmbed, maskOnehot)
+            outputs = self(xScores, xEmbed, xOnehot, maskOnehot)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -1056,10 +1110,9 @@ class SmORFCNN(nn.Module):
     @torch.no_grad()
     def test(self) -> dict:
         """
-        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.\n
-        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.\n
-        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics\n 
-        and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
+        Uses torch.no_grad(), sets the model to evaluation mode using self.eval(), initializes loss function BCEWithLogits.
+        Iterates the validationDataLoader and for each batch, moves inputs to device and uses model's forward function.
+        Then, computes probabillities and loss. Finally, calculates runningLoss and computes all epoch metrics and returns them as a dict. ("loss", "acc", "precision", "recall", "f1", etc.), along with epoch ROC AUC.
 
         Return
         ----------
@@ -1090,12 +1143,15 @@ class SmORFCNN(nn.Module):
 
             xEmbed = self.dnabert6Class.embeddings(sequences)
 
+            xScores = self.compFeaturesClass.score(sequences)
+
             xOnehot = xOnehot.to(self.device)
             maskOnehot = maskOnehot.to(self.device)
             xEmbed = xEmbed.to(self.device)
+            xScores = xScores.to(self.device)
             y = y.to(self.device)
 
-            outputs = self(xOnehot, xEmbed, maskOnehot)
+            outputs = self(xScores, xEmbed, xOnehot, maskOnehot)
 
             loss = lossFunction(outputs, y.float())
             probs = torch.sigmoid(outputs)
@@ -1124,8 +1180,8 @@ class SmORFCNN(nn.Module):
 
     def fit(self, epochs: int):
         """
-        Moves model to device, initializes scheduler and keeps dictionaries for training and validation metrics.\n
-        For each epoch trainEpoch and validateEpoch functions are called, their metrics are saved, along with lr and best state.\n
+        Moves model to device, initializes scheduler and keeps dictionaries for training and validation metrics.
+        For each epoch trainEpoch and validateEpoch functions are called, their metrics are saved, along with lr and best state.
         Finally after the epochs are finished test function is called to test the model and curves for acc,loss,f1 and auc are printed.
 
         Parameters
@@ -1192,7 +1248,7 @@ class SmORFCNN(nn.Module):
 
             Helpers.colourPrint(Types.Colours.BLUE, f"[Scheduler] epoch={epoch} val_loss={epochValMetrics["loss"]:.6f} lr={epochLR:.3e}")
 
-            self.scheduler.step()
+            self.scheduler.step(epochValMetrics["loss"])
 
             if validationMetrics["f1"][epoch - 1] > bestF1:
                 bestF1 = validationMetrics["f1"][epoch - 1]
@@ -1324,13 +1380,13 @@ class SmORFCNN(nn.Module):
     @torch.no_grad()
     def predict(self):
         """
-        Reads sequences from FASTA file and converts them to a list.\n
-        For each sequence create 1hot encoded sequence, mask and dnabert6 embeddings.\n
-        Pass the tensor through forward and find the label based on the probabillity from sigmoid.\n
-        Finally create a csv file with all the sequences, labels and probibillities.\n
+        Reads sequences from FASTA file and converts them to a list.
+        For each sequence create 1hot encoded sequence, mask and dnabert6 embeddings.
+        Pass the tensor through forward and find the label based on the probabillity from sigmoid.
+        Finally create a csv file with all the sequences, labels and probibillities.
 
-        FASTA file loaded from class atribute's: `predictInputPath`.\n
-        Csv file saved to class atribute path: `predictOutputPath`.\n
+        FASTA file loaded from class atribute's: `predictInputPath`.
+        Csv file saved to class atribute path: `predictOutputPath`.
 
         Finally, prints a count of coding vs non-coding labels and a percentage, based on the total sequences.
         """
@@ -1525,5 +1581,5 @@ class SmORFCNN(nn.Module):
 mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=False)
 # mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
 mymodel.initializeDataset()
-mymodel.fit(10)
+mymodel.fit(20)
 # mymodel.predict()

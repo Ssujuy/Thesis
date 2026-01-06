@@ -30,9 +30,8 @@ def toDataloaders(
     ):
 
     """
-    Function that takes a DataFrame (sequence and label columns) as argument,\n
-    Calculates onehot encoded sequences and masks for onehot, combines all together and\n
-    shuffles the dataset then splits it into training, validation and testing DataLoaders.
+    Function that takes a DataFrame (sequence and label columns) as argument.
+    Calculates onehot encoded sequences and masks for onehot, combines all together and shuffles the dataset then splits it into training, validation and testing DataLoaders.
 
     Parameters
     ----------
@@ -305,8 +304,7 @@ def sequenceTo1Hot(sequence: str)-> torch.Tensor:
 def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
     """
-    Calculate `Masked Global Max`. For 1hot encoded sequences,\n
-    make padded positions to -inf using the mask so they cant win the MAX.
+    Calculate `Masked Global Max`. For 1hot encoded sequences make padded positions to -inf using the mask so they cant win the MAX.
 
     Parameters
     ----------
@@ -332,8 +330,7 @@ def globalMaxPooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 def globalAveragePooling(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
     """
-    Calculate `Masked Global Average`. For 1hot encoded sequences,\n
-    zero-out padded positions using the mask so they are not included to sum.
+    Calculate `Masked Global Average`. For 1hot encoded sequences zero-out padded positions using the mask so they are not included to sum.
 
     Parameters
     ----------
@@ -516,8 +513,8 @@ def computeEpochMCC(metrics: dict, epochIndex: int) -> float:
 
 def kFoldSummary(foldMetrics: list) -> dict:
     """
-    Calculates summary from kFold Cross Validation.\n
-    Mean and Std for keys ---> "loss", "acc", "precision", "recall", "f1", "auc", "learningRate".\n
+    Calculates summary from kFold Cross Validation.
+    Mean and Std for keys ---> "loss", "acc", "precision", "recall", "f1", "auc", "learningRate".
     Total sum for keys    ---> "TP", "TN", "FP", "FN".
 
     Parameters

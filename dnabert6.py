@@ -17,11 +17,9 @@ from sklearn.metrics import (
 
 class DNABERT6:
     """
-    Class DNABERT6 constructs the pre-trained DNABERT-6 model (Jhi & Zhou, 2021),\n
-    along with essential parameters for the model's fine-tune or feature extraction.\n
-    DNABERT6 accepts 6-mer overlapping input of DNA sequences and produces embeddings.\n
-    DNABERT6 class has the option of loading a fine-tuned model and draw embeddings from\n
-    a list of sequences or be fine-tuned (so the model can adjust on specific data) and saved.
+    Class DNABERT6 constructs the pre-trained DNABERT-6 model (Jhi & Zhou, 2021), along with essential parameters for the model's fine-tune or feature extraction.
+    DNABERT6 accepts 6-mer overlapping input of DNA sequences and produces embeddings.
+    DNABERT6 class has the option of loading a fine-tuned model and draw embeddings from a list of sequences or be fine-tuned (so the model can adjust on specific data) and saved.
 
     Attributes
     ----------
@@ -59,9 +57,9 @@ class DNABERT6:
         Device to move model and parameters.
     
     hiddenState : Types.HiddenState
-        Type of embeddings to be returned, (CLS, MEAN, BOTH).\n
-        CLS: return embeddings from the CLS token.\n
-        MEAN: return embeddings from mean average of all tokens, except CLS, SEP, PAD.\n
+        Type of embeddings to be returned, (CLS, MEAN, BOTH).
+        CLS: return embeddings from the CLS token.
+        MEAN: return embeddings from mean average of all tokens, except CLS, SEP, PAD.
         BOTH: return concatenation of CLS + MEAN.
 
     strategy : str
@@ -76,31 +74,31 @@ class DNABERT6:
     Methods
     ----------
     datasetInit() -> None
-        Initialize dataset csv file, tokenise every row with DNABERT's tokenizer.\n
+        Initialize dataset csv file, tokenise every row with DNABERT's tokenizer.
         Finally, create pyTorch tensor and assign training and validation Datasets to member variables.
 
     _poolHidden(self, hidden, attentionMask, state: Types.HiddenState, specialTokensMask=None)
-        With hidden(B, L, 768), last_hidden_state from DNABERT and attentionMask for valid positions,\n
-        embeddings are returned for a batch of sequences.\n\n
+        With hidden(B, L, 768), last_hidden_state from DNABERT and attentionMask for valid positions,
+        embeddings are returned for a batch of sequences.
 
-        For state CLS: embeddings from [CSL] token are returned, size: (B, 768).\n
-        For state MEAN: mean average of embeddings from all tokens except [CLS], [SEP] and [PAD] are returned, size: (B, 768).\n
+        For state CLS: embeddings from [CSL] token are returned, size: (B, 768).
+        For state MEAN: mean average of embeddings from all tokens except [CLS], [SEP] and [PAD] are returned, size: (B, 768).
         For state BOTH: CLS and MEAN embeddings are concatenated, size: (B,1536). 
     
     metrics(self, evalPred) -> dict
-        Function given to Trainer to evaluate metrics: (accuracy, f1_score, loss, precision).\n
+        Function given to Trainer to evaluate metrics: (accuracy, f1_score, loss, precision).
         Returns a dictionary {"accuracy", "precision", "recall", "f1", "cross_entropy"}.
     
     encode(self, batch) -> AutoTokenizer
-        Convert batched string to sequences to kmers and return tokenizer.\n
+        Convert batched string to sequences to kmers and return tokenizer.
         Return an AutoTokenizer with batchedKmers.
 
     finetune(self, **override) -> None
-        Fine-tune the DNABERT-6 model with coding and non-coding labeled smORFs taken from our train.csv.\n
+        Fine-tune the DNABERT-6 model with coding and non-coding labeled smORFs taken from our train.csv.
         Initialize TrainingArguments and Trainer, fine-tune then save model and training arguments to directory.
 
     embeddings(self, sequences: list) -> torch.Tensor
-        Calculate DNABERT-6 embeddings for a list of sequences. Return a pyTorch Tensor with size (B,768)\n
+        Calculate DNABERT-6 embeddings for a list of sequences. Return a pyTorch Tensor with size (B,768).
         for hidden state  CLS or MEAN or a size of (B, 1536) for hidden state BOTH.
 
     load(self, modelPath: str) -> None:
@@ -131,8 +129,7 @@ class DNABERT6:
                 saveDir : str                           = Types.DEFAULT_DNABERT6_SAVE_DIRECTORY
             ):
         """
-        Constructor for DNABERT6 class. Initializes member variables and DNABERT-6 pre-trained model,\n
-        that can be fine-tuned or used to draw embeddings from a list of sequences.
+        Constructor for DNABERT6 class. Initializes member variables and DNABERT-6 pre-trained model, that can be fine-tuned or used to draw embeddings from a list of sequences.
 
         Attributes
         ----------
@@ -170,9 +167,9 @@ class DNABERT6:
             Device to move model and parameters.
         
         hiddenState : Types.HiddenState
-            Type of embeddings to be returned, (CLS, MEAN, BOTH).\n
-            CLS: return embeddings from the CLS token.\n
-            MEAN: return embeddings from mean average of all tokens, except CLS, SEP, PAD.\n
+            Type of embeddings to be returned, (CLS, MEAN, BOTH).
+            CLS: return embeddings from the CLS token.
+            MEAN: return embeddings from mean average of all tokens, except CLS, SEP, PAD.
             BOTH: return concatenation of CLS + MEAN.
 
         strategy : str
@@ -234,7 +231,7 @@ class DNABERT6:
 
     def datasetInit(self) -> None:
         """
-        Initialize dataset csv file, tokenise every row with DNABERT's tokenizer.\n
+        Initialize dataset csv file, tokenise every row with DNABERT's tokenizer.
         Finally, create pyTorch tensor and assign training and validation Datasets to member variables.
         """
 
@@ -254,11 +251,10 @@ class DNABERT6:
 
     def _poolHidden(self, hidden, attentionMask, state: Types.HiddenState, specialTokensMask=None) -> torch.Tensor:
         """
-        With hidden(B, L, 768), last_hidden_state from DNABERT and attentionMask for valid positions,\n
-        embeddings are returned for a batch of sequences.\n\n
+        With hidden(B, L, 768), last_hidden_state from DNABERT and attentionMask for valid positions embeddings are returned for a batch of sequences.
 
-        For state CLS: embeddings from [CSL] token are returned, size: (B, 768).\n
-        For state MEAN: mean average of embeddings from all tokens except [CLS], [SEP] and [PAD] are returned, size: (B, 768).\n
+        For state CLS: embeddings from [CSL] token are returned, size: (B, 768).
+        For state MEAN: mean average of embeddings from all tokens except [CLS], [SEP] and [PAD] are returned, size: (B, 768).
         For state BOTH: CLS and MEAN embeddings are concatenated, size: (B,1536).
 
         Parameters
@@ -385,7 +381,7 @@ class DNABERT6:
 
     def finetune(self, **override) -> None:
         """
-        Fine-tune the DNABERT-6 model with coding and non-coding labeled smORFs taken from our train.csv.\n
+        Fine-tune the DNABERT-6 model with coding and non-coding labeled smORFs taken from our train.csv.
         Initialize TrainingArguments and Trainer, fine-tune then save model and training arguments to directory.
         """
 
@@ -421,8 +417,7 @@ class DNABERT6:
 
     def embeddings(self, sequences: list) -> torch.Tensor:
         """
-        Calculate DNABERT-6 embeddings for a list of sequences. Return a pyTorch Tensor with size (B,768)\n
-        for hidden state  CLS or MEAN or a size of (B, 1536) for hidden state BOTH.
+        Calculate DNABERT-6 embeddings for a list of sequences. Return a pyTorch Tensor with size (B,768) for hidden state  CLS or MEAN or a size of (B, 1536) for hidden state BOTH.
 
         Parameters
         ----------
@@ -438,7 +433,7 @@ class DNABERT6:
         self.model.eval()
         self.model.to(self.device)
 
-        out = torch.empty((len(sequences), self.projectionDimension), device=self.device, dtype=torch.float16)
+        out = torch.empty((len(sequences), self.projectionDimension), device=self.device, dtype=torch.float32)
         idx = 0
 
         with torch.no_grad():
@@ -465,7 +460,7 @@ class DNABERT6:
                 pooled = self._poolHidden(hidden, attentionMask, self.hiddenState, specialTokensMask)
 
                 bsz = pooled.size(0)
-                out[idx : idx + bsz] = pooled.to(dtype=torch.float16)
+                out[idx : idx + bsz] = pooled.to(dtype=torch.float32)
                 idx += bsz
 
         return out
