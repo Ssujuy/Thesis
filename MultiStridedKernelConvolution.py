@@ -5,7 +5,7 @@ from Convolution import ConvolutionBlock
 import Types, Helpers
 
 # ---------------------------------------------
-# Multiple Strided Kernel Convultion
+# Multi Strided Kernel Convultion
 # ---------------------------------------------
 
 class MultiGapKernelConvolution(nn.Module):
