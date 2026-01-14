@@ -1506,7 +1506,7 @@ class SmORFCNN(nn.Module):
             maskOnehot: torch.Tensor
         ):
         """
-        Prints model's forward input shapes and dtypes for xOnehot, maskOnehot and xEmbeddings.\n
+        Prints model's forward input shapes and dtypes for xOnehot, maskOnehot and xEmbeddings.
         Prints will occur until limit is reached and debugMode is True.
 
         Parameters
@@ -1529,7 +1529,7 @@ class SmORFCNN(nn.Module):
     
     def _debugLogits(self, logits: torch.Tensor):
         """
-        Prints logits shape and a small sample.\n
+        Prints logits shape and a small sample.
         Prints will occur until limit is reached and debugMode is True.
 
         Parameters
@@ -1552,7 +1552,7 @@ class SmORFCNN(nn.Module):
             epochIndex: int
         ):
         """
-        Prints final stats at the end of epoch. Prints shape of probabillities and targets.\n
+        Prints final stats at the end of epoch. Prints shape of probabillities and targets.
         Prints epoch's loss. Prints will occur only for first epoch.
 
         Parameters
