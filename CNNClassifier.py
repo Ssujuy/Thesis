@@ -206,7 +206,12 @@ class SmORFCNN(nn.Module):
         For each epoch trainEpoch and validateEpoch functions are called, their metrics are saved, along with lr and best state.
         Finally after the epochs are finished test function is called to test the model and curves for acc,loss,f1 and auc are printed.
 
-    kFoldCrossValidation()
+    kFoldCrossValidation(k: int = Types.DEFAULT_SMORFCNN_KFOLD):
+        Performs a Stratified k-fold Cross Validation.
+        Creates a new Dataset, extracts labels and initializes StratifiedKFold.
+        Seed, dataset, optimizer and schedulers change per fold.
+        First the kFold CV trains, then validates the best model produced from fit function.
+        Finally, the best model is saved.
 
     predict()
         Reads sequences from FASTA file and converts them to a list.
@@ -1282,6 +1287,16 @@ class SmORFCNN(nn.Module):
 
     def kFoldCrossValidation(self, k: int = Types.DEFAULT_SMORFCNN_KFOLD):
         """
+        Performs a Stratified k-fold Cross Validation.
+        Creates a new Dataset, extracts labels and initializes StratifiedKFold.
+        Seed, dataset, optimizer and schedulers change per fold.
+        First the kFold CV trains, then validates the best model produced from fit function.
+        Finally, the best model is saved.
+
+        Parameters
+        ----------
+        k : int
+            K is the number of folds the Cross Validation will have.
         """
 
         originalTrainDataLoader = self.trainDataLoader
@@ -1289,16 +1304,7 @@ class SmORFCNN(nn.Module):
 
         fullDataset = ConcatDataset([originalTrainDataLoader.dataset, originalValidationDataLoader.dataset])
 
-        tSubset, vSubset = originalTrainDataLoader.dataset, originalValidationDataLoader.dataset
-
-        tBase, vBase = tSubset.dataset, vSubset.dataset
-
-        tIdx = torch.as_tensor(tSubset.indices, dtype=torch.long)
-        vIdx = torch.as_tensor(vSubset.indices, dtype=torch.long)
-
-        tLabels = tBase.tensors[-1].index_select(0, tIdx)
-        vLabels = vBase.tensors[-1].index_select(0, vIdx)
-        labels = torch.cat([tLabels, vLabels], dim=0).detach().cpu().long().numpy()
+        labels = np.array([item[-1].item() for item in fullDataset])
 
         splitter = StratifiedKFold(n_splits=k, shuffle=True, random_state=self.seed)
         splits = list(splitter.split(np.arange(len(labels)), labels))
@@ -1310,7 +1316,7 @@ class SmORFCNN(nn.Module):
 
         initialState = {k: v.detach().cpu().clone() for k, v in self.state_dict().items()}
 
-        iterator = tqdm(enumerate(splits, start=1),total=k,desc=f"{k}-Fold CV",leave=True)
+        iterator = tqdm(enumerate(splits, start=1),total=k,desc=f"{k}-Fold Cross Validation",leave=True)
 
         for foldIndex, (trainIndex, valIndex) in iterator:
 
