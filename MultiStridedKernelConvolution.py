@@ -8,7 +8,7 @@ import Types, Helpers
 # Multi Strided Kernel Convultion
 # ---------------------------------------------
 
-class MultiGapKernelConvolution(nn.Module):
+class MultiStridedKernelConvolution(nn.Module):
     """
     Parallel Convolution Blocks with different kernel widths and different stride sizes.
     To capture short motifs (codons, start/stop) and longer context for DNA sequences.
@@ -64,19 +64,19 @@ class MultiGapKernelConvolution(nn.Module):
     ----------
     forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
         Compute convolution with different kernel widths and different stride sizes.
-        Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).
+        Output of each branch is L_out = (L_in - k + 1) / 2 and output shape is (B,C_out,L_out).
         Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.
         Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.
-        Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min)
+        Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min).
     """
 
     def __init__(
         self,
         inputChannels,
-        outputChannelsGKernel: int,
-        kernelList: list            = Types.DEFAULT_MULTI_GAP_KERNEL_KERNEL_LIST,
-        gapList: list               = Types.DEFAULT_MULTI_GAP_KERNEL_GAP_LIST,
-        stride: int                 = Types.DEFAULT_CONVOLUTION_STRIDE,
+        outputChannelsSKernel: int,
+        kernelList: list            = Types.DEFAULT_MULTI_STRIDED_KERNEL_KERNEL_LIST,
+        strideList: int             = Types.DEFAULT_MULTI_STRIDED_KERNEL_STRIDE_LIST,
+        dilation: list              = Types.DEFAULT_CONVOLUTION_DILATION,
         padding: str                = Types.DEFAULT_CONVOLUTION_PADDING,
         groups: int                 = Types.DEFAULT_CONVOLUTION_GROUPS,
         activation: str             = Types.DEFAULT_CONVOLUTION_ACTIVATION,
@@ -93,8 +93,8 @@ class MultiGapKernelConvolution(nn.Module):
         inputChannels: int
             Size of input.
 
-        outputChannelsGKernel: int
-            Size of output for each gap kernel.
+        outputChannelsSKernel: int
+            Size of output for each stride kernel.
     
         kernelList : list
             A list of different sized kernels.
@@ -102,7 +102,7 @@ class MultiGapKernelConvolution(nn.Module):
         strideList : list
             A list of different sized strides.
         
-        dillation : int
+        dilation : int
             Spacing between kernel taps.
 
         padding : int
@@ -126,10 +126,10 @@ class MultiGapKernelConvolution(nn.Module):
         super().__init__()
 
         self.inputChannels = inputChannels
-        self.outputChannelsBranch = outputChannelsGKernel
+        self.outputChannelsBranch = outputChannelsSKernel
         self.kernelList = kernelList
-        self.gapList = gapList
-        self.stride = stride
+        self.strideList = strideList
+        self.dilation = dilation
         self.padding = padding
         self.groups = groups
         self.activation = activation
@@ -143,16 +143,15 @@ class MultiGapKernelConvolution(nn.Module):
         self.pairs = []
 
         for k in kernelList:
-            for g in gapList:
-                dil = g + 1
+            for s in strideList:
                 self.branches.append(
                     ConvolutionBlock(
                         inputChannels=self.inputChannels,
                         outputChannels=self.outputChannelsBranch,
                         kernel=k,
-                        stride=self.stride,
+                        stride=s,
                         padding=self.padding,
-                        dilation=dil,
+                        dilation=self.dilation,
                         groups=self.groups,
                         activation=self.activation,
                         dropout=self.dropout,
@@ -160,7 +159,7 @@ class MultiGapKernelConvolution(nn.Module):
                         debug=self.debugMode,
                     )
                 )
-                self.pairs.append((k, g))
+                self.pairs.append((k, s))
 
         self.outputChannels = self.outputChannelsBranch * len(self.branches)
 
@@ -169,8 +168,8 @@ class MultiGapKernelConvolution(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor):
         """
-        Compute convolution with different kernel widths and different gap sizes.
-        Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).
+        Compute convolution with different kernel widths and different stride sizes.
+        Output of each branch is L_out = (L_in - k + 1) / 2 and output shape is (B,C_out,L_out).
         Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.
         Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.
         Finally, the features of shape (B, C_out, L_min) are concatenated and create (B, C_out x 5, L_min).
@@ -183,7 +182,7 @@ class MultiGapKernelConvolution(nn.Module):
         Return
         ----------
         tuple[Tensor, Tensor]
-            Output Tensor and mask Tensor after multiple convolution with different kernel size.
+            Output Tensor and mask Tensor after multiple convolution with different kernel size adn stride.
         """
         outputs = []
         masks = []
@@ -217,12 +216,13 @@ class MultiGapKernelConvolution(nn.Module):
         Prints member variables of the class and number of model parameters and trainable model parameters.
         """
 
-        Helpers.colourPrint(Types.Colours.BLUE, "Multiple Gap Kernel Convolution Parameters:")
+        Helpers.colourPrint(Types.Colours.BLUE, "Multiple Strided Kernel Convolution Parameters:")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Input Channels: {self.inputChannels}")
-        Helpers.colourPrint(Types.Colours.BLUE, f" - Output Channels per Gap Kernel: {self.outputChannelsBranch}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Output Channels per Stride Kernel: {self.outputChannelsBranch}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Output Channels: {self.outputChannels}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Kernel List: {self.kernelList}")
-        Helpers.colourPrint(Types.Colours.BLUE, f" - Stride: {self.stride}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Stride List: {self.strideList}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Dilation: {self.dilation}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Padding: {self.padding}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Groups: {self.groups}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Activation: {self.activation}")
@@ -248,8 +248,8 @@ class MultiGapKernelConvolution(nn.Module):
         if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
             Helpers.colourPrint(
                 Types.Colours.PURPLE,
-                f"[MultiGapKernelConvolution] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
-                f"[MultiGapKernelConvolution] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
+                f"[MultiStridedKernelConvolution] Input x.shape={tuple(x.shape)}-dtype={x.dtype}, mask.shape={tuple(mask.shape)}-dtype={mask.dtype}\n"
+                f"[MultiStridedKernelConvolution] mask sum per-batch={mask.sum(dim=1).detach().cpu().tolist()[:4]}"
             )
 
     def _debugBranch(self, b: torch.Tensor, m: torch.Tensor):
@@ -269,8 +269,8 @@ class MultiGapKernelConvolution(nn.Module):
         if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
             Helpers.colourPrint(
                 Types.Colours.PURPLE,
-                f"[MultiGapKernelConvolution] Branch x.shape={tuple(b.shape)}-dtype={b.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
-                f"[MultiGapKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
+                f"[MultiStridedKernelConvolution] Branch x.shape={tuple(b.shape)}-dtype={b.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
+                f"[MultiStridedKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
             )
 
     def _debugOut(self, out: torch.Tensor, m: torch.Tensor) -> None:
@@ -290,6 +290,6 @@ class MultiGapKernelConvolution(nn.Module):
         if self.debugMode and self.forwardDebugLimit > self.forwardDebugCounter:
             Helpers.colourPrint(
                 Types.Colours.PURPLE,
-                f"[MultiGapKernelConvolution] Output out.shape={tuple(out.shape)}-dtype={out.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
-                f"[MultiGapKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
+                f"[MultiStridedKernelConvolution] Output out.shape={tuple(out.shape)}-dtype={out.dtype}, mask.shape={tuple(m.shape)}-dtype={m.dtype}\n"
+                f"[MultiStridedKernelConvolution] mask sum per-batch={m.sum(dim=1).detach().cpu().tolist()[:4]}"
             )

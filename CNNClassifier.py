@@ -12,6 +12,7 @@ import Types, Helpers
 from dataRead import fastaToList
 from MultiKernelConvolution import MultiKernelConvolution
 from MultiGapKernelConvolution import MultiGapKernelConvolution
+from MultiStridedKernelConvolution import MultiStridedKernelConvolution
 from dnabert6 import DNABERT6
 from ComputationalFeatures import ComputationalFeatures
 
@@ -61,6 +62,9 @@ class SmORFCNN(nn.Module):
     multiGapKernel : bool
         Activates Multiple Gap Kernel Convolution branch for feature extraction.
 
+    multiStrideKernel : bool
+        Activates Multiple Strided Kernel Convolution branch for feature extraction.
+
     dnabertEmbeddings : bool
         Activates DNABERT-6 branch for embeddings feature extraction.
 
@@ -72,15 +76,24 @@ class SmORFCNN(nn.Module):
 
     multiGapKernelList : list
         List of different kernel sizes Multi Gap Kernel Convolution.
-    
+
+    multiStrideKernelList : list
+        List of different kernel sizes Multi Strided Kernel Convolution.
+
     multiGapKernelGapList : list
         List of gaps for Multi Gap Kernel Convolution.            
 
+    multiStrideKernelStrideList : list       
+        List of strides for Multi Strided Kernel Convolution.                    
+    
     outputChannelsPerKernel : int
         Size of C_out, output channels per kernel convolution block.
     
     outputChannelsPerGapKernel : int
         Size of C_out, output channels per gap kernel convolution block.
+
+    outputChannelsPerStrideKernel : int
+        Size of C_out, output channels per stride kernel convolution block.
 
     dnabertReductionSize : int
         Size of dnabert6 embeddings after reduction.
@@ -90,6 +103,9 @@ class SmORFCNN(nn.Module):
 
     mgkcReductionSize : int
         Size of Multiple Gap Kernel Convolution features after reduction.
+
+    mskcReductionSize : int
+        Size of Multiple Stride Kernel Convolution features after reduction.
 
     compFeaturesIncreaseSize : int
         Size of computational features after increase.
@@ -254,16 +270,21 @@ class SmORFCNN(nn.Module):
         saveModelPathDir: str                   = Types.DEFAULT_SMORFCNN_SAVE_DIR_PATH,
         multiKernel: bool                       = Types.DEFAULT_SMORFCNN_MULTI_KERNEL,
         multiGapKernel: bool                    = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL,
+        multiStrideKernel: bool                 = Types.DEFAULT_SMORFCNN_MULTI_STRIDE_KERNEL,
         dnabertEmbeddings: bool                 = Types.DEFAULT_SMORFCNN_DNABERT,
         computationalFeatures: bool             = Types.DEFAULT_SMORFCNN_COMPUTATIONAL_FEATURES,
         multiKernelList: list                   = Types.DEFAULT_SMORFCNN_MULTI_KERNEL_LIST,
         multiGapKernelList: list                = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_LIST,
+        multiStrideKernelList: list             = Types.DEFAULT_SMORFCNN_MULTI_S_KERNEL_K_LIST,
         multiGapKernelGapList: list             = Types.DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_GAP_LIST,
+        multiStrideKernelStrideList: list       = Types.DEFAULT_SMORFCNN_MULTI_S_KERNEL_S_LIST,
         outputChannelsPerKernel: int            = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL,
-        outputChannelsPerGapKernel: int         = Types.DEFAULT_MULTI_GAP_KERNEL_OUTPUT,
+        outputChannelsPerGapKernel: int         = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_G_KERNEL,
+        outputChannelsPerStrideKernel: int      = Types.DEFAULT_SMORFCNN_OUTPUT_CHANNELS_S_KERNEL,
         dnabertReductionSize: int               = Types.DEFAULT_SMORFCNN_DNABERT_REDUCTION_SIZE,
         mkcReductionSize: int                   = Types.DEFAULT_SMORFCNN_MKC_REDUCTION_SIZE,
         mgkcReductionSize: int                  = Types.DEFAULT_SMORFCNN_MGKC_REDUCTION_SIZE,
+        mskcReductionSize: int                  = Types.DEFAULT_SMORFCNN_MSKC_REDUCTION_SIZE,
         compFeaturesIncreaseSize: int           = Types.DEFAULT_SMORFCNN_SCALAR_INCREASE_SIZE,
         classes: int                            = Types.DEFAULT_SMORFCNN_CLASSES,
         layer1Output: int                       = Types.DEFAULT_SMORFCNN_CLASSIFIER_L1_OUTPUT,
@@ -314,6 +335,9 @@ class SmORFCNN(nn.Module):
         multiGapKernel : bool
             Activates Multiple Gap Kernel Convolution branch for feature extraction.
 
+        multiStrideKernel : bool
+            Activates Multiple Strided Kernel Convolution branch for feature extraction.
+
         dnabertEmbeddings : bool
             Activates DNABERT-6 branch for embeddings feature extraction.
 
@@ -326,14 +350,23 @@ class SmORFCNN(nn.Module):
         multiGapKernelList : list
             List of different kernel sizes Multi Gap Kernel Convolution.
         
+        multiStrideKernelList : list
+            List of different kernel sizes Multi Strided Kernel Convolution.
+
         multiGapKernelGapList : list
-            List of gaps for Multi Gap Kernel Convolution.            
+            List of gaps for Multi Gap Kernel Convolution.
+
+        multiStrideKernelStrideList : list
+            List of strides for Multi Strided Kernel Convolution.
 
         outputChannelsPerKernel : int
             Size of C_out, output channels per kernel convolution block.
         
         outputChannelsPerGapKernel : int
             Size of C_out, output channels per gap kernel convolution block.
+
+        outputChannelsPerStrideKernel : int
+            Size of C_out, output channels per stride kernel convolution block.
 
         dnabertReductionSize : int
             Size of dnabert6 embeddings after reduction.
@@ -343,6 +376,9 @@ class SmORFCNN(nn.Module):
 
         mgkcReductionSize : int
             Size of Multiple Gap Kernel Convolution features after reduction.
+
+        mskcReductionSize : int
+            Size of Multiple Stride Kernel Convolution features after reduction.            
 
         compFeaturesIncreaseSize : int
             Size of computational features after increase.
@@ -443,16 +479,21 @@ class SmORFCNN(nn.Module):
 
         self.multiKernel = multiKernel
         self.multiGapKernel = multiGapKernel
+        self.multiStrideKernel = multiStrideKernel
         self.dnabertEmbeddings = dnabertEmbeddings
         self.computationalFeatures = computationalFeatures
         self.multiKernelList = multiKernelList
         self.multiGapKernelList = multiGapKernelList
+        self.multiStrideKernelList = multiStrideKernelList
         self.multiGapKernelGapList = multiGapKernelGapList
+        self.multiStrideKernelStrideList = multiStrideKernelStrideList
         self.outputChannelsPerKernel = outputChannelsPerKernel
         self.outputChannelsPerGapKernel = outputChannelsPerGapKernel
+        self.outputChannelsPerStrideKernel = outputChannelsPerStrideKernel
         self.dnabertReductionSize = dnabertReductionSize
         self.mkcReductionSize = mkcReductionSize
         self.mgkcReductionSize = mgkcReductionSize
+        self.mskcReductionSize = mskcReductionSize
         self.compFeaturesIncreaseSize = compFeaturesIncreaseSize
         self.layer1Output = layer1Output
         self.layer2Output = layer2Output
@@ -484,6 +525,9 @@ class SmORFCNN(nn.Module):
         self.multiGapKernelClass = None
         self.multiGapKernelReduction = None
 
+        self.multiStidedKernelClass = None
+        self.multiStridedKernelReduction = None
+
         self.compFeaturesClass = None
         self.compFeaturesIncrease = None
 
@@ -510,6 +554,23 @@ class SmORFCNN(nn.Module):
             self.multipleKernelReduction = nn.Sequential(
                 nn.Linear(self.multiKernelClass.outputChannels * 2, self.mkcReductionSize),
                 nn.BatchNorm1d(self.mkcReductionSize),
+                nn.GELU(),
+                nn.Dropout(self.classifierDropout)
+            )
+
+        if self.multiStrideKernel:
+            self.multiStidedKernelClass = MultiStridedKernelConvolution(
+                inputChannels=self.onehotInputChannels,
+                outputChannelsSKernel=self.outputChannelsPerKernel,
+                kernelList=self.multiStrideKernelList,
+                strideList=self.multiStrideKernelStrideList,
+                debug=self.debugMode,
+                forwardDebugLimit=self.forwardDebugLimit
+            )
+
+            self.multiStridedKernelReduction = nn.Sequential(
+                nn.Linear(self.multiStidedKernelClass.outputChannels * 2, self.mskcReductionSize),
+                nn.BatchNorm1d(self.mskcReductionSize),
                 nn.GELU(),
                 nn.Dropout(self.classifierDropout)
             )
@@ -816,6 +877,9 @@ class SmORFCNN(nn.Module):
         if self.multiGapKernel:
             fusedDim += self.mgkcReductionSize
 
+        if self.multiGapKernel:
+            fusedDim += self.mgkcReductionSize
+
         if self.computationalFeatures:
             fusedDim += self.compFeaturesIncreaseSize
 
@@ -895,6 +959,7 @@ class SmORFCNN(nn.Module):
         features = []
         inputMKCOneHot = xOnehot
         inputMGKCOneHot = xOnehot
+        inputMSKCOneHot = xOnehot
         inputEmbeddings = xEmbeddings
         inputScores = xScores
 
@@ -912,6 +977,17 @@ class SmORFCNN(nn.Module):
             gmp = Helpers.globalMaxPooling(inputMKCOneHot, maskMKC)
 
             reduction = self.multipleKernelReduction(torch.cat([gap, gmp], dim=1))
+
+            features.append(reduction)
+
+        if self.multiGapKernel:
+
+            inputMSKCOneHot, maskMSKC = self.multiStidedKernelClass(inputMSKCOneHot, maskOnehot)
+
+            gap = Helpers.globalAveragePooling(inputMSKCOneHot, maskMSKC)
+            gmp = Helpers.globalMaxPooling(inputMSKCOneHot, maskMSKC)
+
+            reduction = self.multiStridedKernelReduction(torch.cat([gap, gmp], dim=1))
 
             features.append(reduction)
 
