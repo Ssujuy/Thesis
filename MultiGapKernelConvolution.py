@@ -34,7 +34,7 @@ class MultiGapKernelConvolution(nn.Module):
         A list of different sized kernels.
     
     gapList : list
-        A list of different sized gaps(dillations).
+        A list of different sized gaps(dilations).
     
     stride : int
         How far the kernel moves during each step.
@@ -63,7 +63,7 @@ class MultiGapKernelConvolution(nn.Module):
     Methods
     ----------
     forward(x : Tensor, mask : Tensor) -> tuple[Tensor, Tensor]:
-        Compute convolution with different kernel widths and different gap sizes (dillation).
+        Compute convolution with different kernel widths and different gap sizes (dilation).
         Output of each branch is L_out = L_in - k + 1 and output shape is (B,C_out,L_out).
         Because different kernel widths produce different L_out we crop to minimum, which is L_min = 498.
         Mask first is updated from each convolution, cropped to L_min and combined with or statement for each mask.
@@ -100,7 +100,7 @@ class MultiGapKernelConvolution(nn.Module):
             Number of adjacent positions a single filter looks at.
         
         gapList : list
-            Number of dillation.
+            Number of dilation.
 
         stride : int
             How far the kernel moves during each step.

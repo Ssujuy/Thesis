@@ -53,18 +53,30 @@ DEFAULT_MULTI_GAP_KERNEL_GAP_LIST:           list        = [1,2,3]
 DEFAULT_MULTI_GAP_KERNEL_OUTPUT:             int         = 64
 ########## ----------- End --------- ##########
 
+########## ----------- Multi Strided Kernel Convolution Defaults --------- ##########
+DEFAULT_MULTI_STRIDED_KERNEL_KERNEL_LIST:    list        = [3,5,7,11,15]
+DEFAULT_MULTI_STRIDED_KERNEL_STRIDE_LIST:    list        = [2,3]
+DEFAULT_MULTI_STRIDED_KERNEL_OUTPUT:         int         = 64
+########## ----------- End --------- ##########
+
 ########## ----------- SMORF CNN Classifier Defaults --------- ##########
 DEFAULT_SMORFCNN_SAVE_DIR_PATH:              str         = "smorfCNN"
 DEFAULT_SMORFCNN_MULTI_KERNEL:               bool        = True
 DEFAULT_SMORFCNN_MULTI_GAP_KERNEL:           bool        = True
+DEFAULT_SMORFCNN_MULTI_STRIDE_KERNEL:        bool        = True
 DEFAULT_SMORFCNN_DNABERT:                    bool        = True
 DEFAULT_SMORFCNN_COMPUTATIONAL_FEATURES:     bool        = True
 DEFAULT_SMORFCNN_MULTI_KERNEL_LIST:          list        = [3,4,5,6,7,11,25]
 DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_LIST:      list        = [3,4,5,6,7,11,25]
+DEFAULT_SMORFCNN_MULTI_S_KERNEL_K_LIST:      list        = [3,4,5,6,7,11,25]
 DEFAULT_SMORFCNN_MULTI_GAP_KERNEL_GAP_LIST:  list        = [1,2,3]
+DEFAULT_SMORFCNN_MULTI_S_KERNEL_S_LIST:      list        = [2,3]
 DEFAULT_SMORFCNN_OUTPUT_CHANNELS_KERNEL:     int         = 256
+DEFAULT_SMORFCNN_OUTPUT_CHANNELS_G_KERNEL:   int         = 256
+DEFAULT_SMORFCNN_OUTPUT_CHANNELS_S_KERNEL:   int         = 256
 DEFAULT_SMORFCNN_MKC_REDUCTION_SIZE:         int         = 256
 DEFAULT_SMORFCNN_MGKC_REDUCTION_SIZE:        int         = 256
+DEFAULT_SMORFCNN_MSKC_REDUCTION_SIZE:        int         = 256
 DEFAULT_SMORFCNN_DNABERT_REDUCTION_SIZE:     int         = 256
 DEFAULT_SMORFCNN_SCALAR_INCREASE_SIZE:       int         = 256
 DEFAULT_SMORFCNN_CLASSES:                    int         = 1
