@@ -235,7 +235,6 @@ class SmORFCNN(nn.Module):
         Pass the tensor through forward and find the label based on the probabillity from sigmoid.
         Finally create a csv file with all the sequences, labels and probibillities.
 
-        FASTA file loaded from class atribute's: `predictInputPath`.
         Csv file saved to class atribute path: `predictOutputPath`.
 
         Finally, prints a count of coding vs non-coding labels and a percentage, based on the total sequences.
@@ -263,7 +262,6 @@ class SmORFCNN(nn.Module):
         onehotInputChannels: int,
         embeddingsInputChannels: int,
         trainPath: str,
-        predictInputPath: str,
         predictOutputPath: str,
         hiddenState: str                        = Types.HiddenState.BOTH,
         dnabertDirectory: str                   = Types.DEFAULT_DNABERT6_SAVE_DIRECTORY,
@@ -474,7 +472,6 @@ class SmORFCNN(nn.Module):
         self.dnabertDirectory = dnabertDirectory
         self.dnabertHiddenState = hiddenState
 
-        self.predictInputPath = predictInputPath
         self.predictOutputPath = predictOutputPath
 
         self.multiKernel = multiKernel
@@ -678,7 +675,6 @@ class SmORFCNN(nn.Module):
             onehotInputChannels         = config["onehotInputChannels"],
             embeddingsInputChannels     = config["embeddingsInputChannels"],
             trainPath                   = config["trainPath"],
-            predictInputPath            = config["predictInputPath"],
             predictOutputPath           = config["predictOutputPath"],
             hiddenState                 = hiddenState,
             dnabertDirectory            = config.get("dnabertDirectory",              Types.DEFAULT_DNABERT6_SAVE_DIRECTORY),
@@ -746,7 +742,6 @@ class SmORFCNN(nn.Module):
             "onehotInputChannels":        self.onehotInputChannels,
             "embeddingsInputChannels":    self.embeddingsInputChannels,
             "trainPath":                  self.trainPath,
-            "predictInputPath":           self.predictInputPath,
             "predictOutputPath":          self.predictOutputPath,
             "hiddenState":                hiddenState,
             "dnabertDirectory":           self.dnabertDirectory,
@@ -840,6 +835,14 @@ class SmORFCNN(nn.Module):
         self.csv_path = Path(self.trainPath)
         dataFrame = pd.read_csv(self.csv_path)
 
+        initialLen = len(dataFrame)
+        dataFrame = dataFrame.drop_duplicates(subset=['sequence'])
+        cleanLen = len(dataFrame)
+
+        Helpers.colourPrint(Types.Colours.WHITE,f"Dropped {initialLen - cleanLen} duplicate sequences.")
+        Helpers.colourPrint(Types.Colours.WHITE,f"Initial Dataset length {initialLen}")
+        Helpers.colourPrint(Types.Colours.WHITE,f"Clean Dataset length {cleanLen}")
+
         self.trainDataLoader, self.validationDataLoader, self.testDataLoader = Helpers.toDataloaders(
             dataFrame,
             self.validationSplit,
@@ -877,8 +880,8 @@ class SmORFCNN(nn.Module):
         if self.multiGapKernel:
             fusedDim += self.mgkcReductionSize
 
-        if self.multiGapKernel:
-            fusedDim += self.mgkcReductionSize
+        if self.multiStrideKernel:
+            fusedDim += self.mskcReductionSize
 
         if self.computationalFeatures:
             fusedDim += self.compFeaturesIncreaseSize
@@ -980,7 +983,7 @@ class SmORFCNN(nn.Module):
 
             features.append(reduction)
 
-        if self.multiGapKernel:
+        if self.multiStrideKernel:
 
             inputMSKCOneHot, maskMSKC = self.multiStidedKernelClass(inputMSKCOneHot, maskOnehot)
 
@@ -1460,33 +1463,38 @@ class SmORFCNN(nn.Module):
         return foldMetrics, summary
 
     @torch.no_grad()
-    def predict(self):
+    def predict(self, codingFastaPath: str, nCodingFastaPath: str):
         """
-        Reads sequences from FASTA file and converts them to a list.
-        For each sequence create 1hot encoded sequence, mask and dnabert6 embeddings.
-        Pass the tensor through forward and find the label based on the probabillity from sigmoid.
-        Finally create a csv file with all the sequences, labels and probibillities.
-
-        FASTA file loaded from class atribute's: `predictInputPath`.
-        Csv file saved to class atribute path: `predictOutputPath`.
-
-        Finally, prints a count of coding vs non-coding labels and a percentage, based on the total sequences.
+        Reads sequences from two separate FASTA files (Coding and Non-Coding).
+        Predicts labels and calculates accuracy against the known ground truth.
         """
-        
         self.eval()
         results = []
-        sequences = fastaToList(self.predictInputPath)
 
-        Helpers.colourPrint(Types.Colours.GREEN, f"Predicting coding vs non-coding small open readind frames, from fasta file: {self.predictInputPath}")
+        try:
+            coding = fastaToList(codingFastaPath)
+            nonCoding = fastaToList(nCodingFastaPath)
+        except Exception as e:
+            Helpers.colourPrint(Types.Colours.RED, f"Error reading FASTA files: {e}")
+            return
 
-        for sequence in sequences:
+        Helpers.colourPrint(Types.Colours.GREEN, f"Loaded {len(coding)} Coding sequences.")
+        Helpers.colourPrint(Types.Colours.GREEN, f"Loaded {len(nonCoding)} Non-Coding sequences.")
+
+
+        allSequences = [(s, 1) for s in coding] + [(s, 0) for s in nonCoding]
+
+        Helpers.colourPrint(Types.Colours.GREEN, "Starting Prediction...")
+
+        iterator = tqdm(allSequences, desc="Predicting") if 'tqdm' in globals() else allSequences
+
+        for sequence, label in iterator:
 
             xOnehot = torch.stack([Helpers.sequenceTo1Hot(sequence)], dim=0).to(torch.float32)
             xOnehot = xOnehot.permute(0, 2, 1).contiguous()
             maskOnehot = (xOnehot.sum(dim=1) > 0).to(torch.float32)
 
             xEmbed = self.dnabert6Class.embeddings([sequence])
-
             xScores = self.compFeaturesClass.score([sequence])
 
             xOnehot = xOnehot.to(self.device)
@@ -1495,27 +1503,53 @@ class SmORFCNN(nn.Module):
             xScores = xScores.to(self.device)
 
             outputs = self(xScores, xEmbed, xOnehot, maskOnehot)
-            probs = torch.sigmoid(outputs)
-            preds = (probs >= self.threshold).to(torch.int8)
+            prob = torch.sigmoid(outputs).item()
+            pred = int(prob >= self.threshold)
 
-            for p, pred, s in zip(probs.tolist(), preds.tolist(), sequences):
-                results.append({
-                    "sequence": s,
-                    "probabillity": float(p),
-                    "label": int(pred)
-                })
+            results.append({
+                "sequence": sequence,
+                "probability": float(prob),
+                "predictedLabel": pred,
+                "trueLabel": label
+            })
 
         Helpers.colourPrint(Types.Colours.GREEN, f"Saving predictions to {self.predictOutputPath}")
         df = pd.DataFrame(results)
         df.to_csv(self.predictOutputPath, index=False)
 
-        counts = df["label"].value_counts().reindex([0, 1], fill_value=0)
         total = len(df)
-        perc = (counts / total * 100).round(2)
 
-        Helpers.colourPrint(Types.Colours.GREEN, f"Total predictions: {total}")
-        Helpers.colourPrint(Types.Colours.GREEN, f"Non Coding sequences: {counts[0]} ({perc[0]}%)")
-        Helpers.colourPrint(Types.Colours.GREEN, f"Coding sequences: {counts[1]} ({perc[1]}%)")
+        if total > 0:
+            predCoding = int(df["predictedLabel"].sum())
+            prednCoding = total - predCoding
+
+            correctPredictions = (df["predictedLabel"] == df["trueLabel"]).sum()
+            accuracy = (correctPredictions / total) * 100
+
+            codingDf = df[df["trueLabel"] == 1]
+            if len(codingDf) > 0:
+                codingAcc = (codingDf["predictedLabel"] == 1).mean() * 100
+            else: 
+                codingAcc = 0.0
+
+            nCodingDf = df[df["trueLabel"] == 0]
+            if len(nCodingDf) > 0:
+                nCodingAcc = (nCodingDf["predictedLabel"] == 0).mean() * 100
+            else:
+                nCodingAcc = 0.0
+
+            print("-" * 30)
+            Helpers.colourPrint(Types.Colours.GREEN, f"Total Sequences: {total}")
+            print("-" * 30)
+            Helpers.colourPrint(Types.Colours.BLUE, f"Overall Accuracy: {accuracy:.2f}%")
+            print("-" * 30)
+            Helpers.colourPrint(Types.Colours.GREEN, f"Correct predictions {correctPredictions}")
+            print("-" * 30)            
+            Helpers.colourPrint(Types.Colours.GREEN, f"Predicted Coding: {predCoding} (True Coding Accuracy: {codingAcc:.2f}%)")
+            Helpers.colourPrint(Types.Colours.GREEN, f"Predicted Non-Coding: {prednCoding} (True Non-Coding Accuracy: {nCodingAcc:.2f}%)")
+            print("-" * 30)
+        else:
+            Helpers.colourPrint(Types.Colours.RED, "No predictions made.")
 
     def saveModel(self) -> None:
         """
@@ -1662,8 +1696,11 @@ class SmORFCNN(nn.Module):
             Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][{function} Epoch-{epochIndex}] End of epoch probs shape={tuple(probabilities.shape)} targets shape={tuple(targets.shape)}")
             Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][{function} Epoch-{epochIndex}] End of epoch loss average={runningLoss/max(1,n):.6f}")
 
-mymodel = SmORFCNN(4,1536,"train.csv","fdedfd","feljfow",debug=False)
-# mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
+
+mymodel = SmORFCNN(4,1536,"train.csv","feljfow",debug=False,multiStrideKernel=False)
+#mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
 mymodel.initializeDataset()
-mymodel.fit(20)
-# mymodel.predict()
+mymodel.fit(10)
+#mymodel.predict("CPPred_test/Human.small_coding_RNA_test.fa", "CPPred_test/Homo38.small_ncrna_test.fa")
+#mymodel.predict("csORF-finder_test_data/H.sapiens_Ribo-csORFs_testp.txt", "csORF-finder_test_data/H.sapiens_Ribo-ncsORFs_testn.txt")
+#mymodel.predict("DeepCPP_raw_data/human_mrnasorf.fa", "DeepCPP_raw_data/human_lncsorf.fa")
