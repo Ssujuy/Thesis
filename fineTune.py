@@ -52,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument("--finetuneTrainBatchSize", type=int, default=Types.DEFAULT_DNABERT6_BATCH_SIZE)
     parser.add_argument("--embeddingsBatchSize", type=int, default=Types.DEFAULT_DNABERT6_BATCH_SIZE)
     parser.add_argument("--hiddenState", type=str, choices=["cls", "mean", "both"], default='both', help="Pooling: 'cls', 'mean', or 'both'.")
-    parser.add_argument("--saveDirectory", type=str, default=Types.DEFAULT_DNABER6_SAVE_DIRECTORY,help="Directory to save the finetuned model.")
+    parser.add_argument("--saveDirectory", type=str, default=Types.DEFAULT_DNABERT6_SAVE_DIRECTORY,help="Directory to save the finetuned model.")
 
     args = parser.parse_args()
 

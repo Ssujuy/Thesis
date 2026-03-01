@@ -189,10 +189,10 @@ class DNABERT6:
         self.hiddenState = hiddenState
 
         if self.hiddenState == Types.HiddenState.BOTH:
-            self.projectionDimension = 2 * Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION
+            self.outputSize = 2 * Types.DEFAULT_DNABERT6_OUTPUT_SIZE
 
         else:
-            self.projectionDimension = Types.DEFAULT_DNABERT6_PROJECTION_DIMENSION
+            self.outputSize = Types.DEFAULT_DNABERT6_OUTPUT_SIZE
 
         self.trainingDatasetPercentage = trainDatasetPercentage
         self.trainingDataPath = trainingDataPath
@@ -223,7 +223,7 @@ class DNABERT6:
         Helpers.colourPrint(Types.Colours.BLUE, f" - Finetuning eval barch size: {self.fineTuneEvalBatchSize}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Finetuning train batch size: {self.fineTuneTrainBatchSize}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Embeddings batch size: {self.embeddingsBatchSize}")
-        Helpers.colourPrint(Types.Colours.BLUE, f" - Projection dimension: {self.projectionDimension}")
+        Helpers.colourPrint(Types.Colours.BLUE, f" - Output size: {self.outputSize}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Hidden state: {self.hiddenState}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Evaluation, logging and save stratefy: {self.strategy}")
         Helpers.colourPrint(Types.Colours.BLUE, f" - Metric for best model: {self.metric}")
@@ -433,7 +433,7 @@ class DNABERT6:
         self.model.eval()
         self.model.to(self.device)
 
-        out = torch.empty((len(sequences), self.projectionDimension), device=self.device, dtype=torch.float32)
+        out = torch.empty((len(sequences), self.outputSize), device=self.device, dtype=torch.float32)
         idx = 0
 
         with torch.no_grad():
