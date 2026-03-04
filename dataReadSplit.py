@@ -10,6 +10,14 @@ import Types
 import Helpers
 
 def datasetSplit():
+    """
+    Reads an initial dataset, performs a stratified split, and saves the resulting subsets.
+
+    This function loads data from 'datasets/initial.csv' and calculates the class distribution for 'Coding' (label 1) and 'Non-Coding' (label 0) rows. 
+    It then performs a stratified split to ensure the original class balance is perfectly preserved.
+    Extracting exactly 10,000 records for a fine-tuning dataset (finetune.csv) and reserving the rest for training (training.csv).
+    The distributions for all three sets are printed to the console, and the new sets are saved to disk.
+    """
     initialDataset = 'datasets/initial.csv'
     df = pd.read_csv(initialDataset)
 
@@ -57,7 +65,14 @@ def datasetSplit():
 
 
 def readFastaExtracted(codingFastaExtracted: str, nonCodingFastaExtracted: str, split: int, filepath: str = "datasets/initial.csv"):
+    """
+    Parses FASTA files, splits sequences based on a percentage, and writes to CSV or test FASTA files.
 
+    This function reads sequences from provided coding and non-coding FASTA files. 
+    It calculates a cutoff index based on the provided `split` percentage. 
+    Sequences up to the cutoff are cleaned and written to a CSV dataset (using an external `toCsv` function), categorized with labels 1 (coding) and 0 (non-coding).
+    The remaining sequences are cleaned and written to dedicated test FASTA files stored in the 'data/extracted/' directory.
+    """
     codingTest = "data/extracted/coding_smorfs_2pep_test.fa"
     nonCodingTest = "data/extracted/non_coding_smorfs_2pep_test.fa"
 
@@ -100,8 +115,12 @@ def readFastaExtracted(codingFastaExtracted: str, nonCodingFastaExtracted: str, 
 def fastaToList(path: str) -> list:
     """
     Generator that parses DNA sequences from FASTA files, cleans them up and returns them in a list.
-    """
 
+    Return
+    ----------
+    list
+        DNA sequence as a list.
+    """
     sequenceList = []
 
     for record in SeqIO.parse(path, "fasta"):
@@ -122,6 +141,11 @@ def cleanup(seq: str, size: int = 400) -> str:
     """
     Return an upper-case, ambiguity-free DNA string of exactly pad_to length.
     Truncates if longer.
+
+    Return
+    ----------
+    str
+        Upper-case cleaned up from ambiguous characters DNA sequence.
     """
 
     seq = str(seq).upper()
@@ -141,12 +165,16 @@ def cleanup(seq: str, size: int = 400) -> str:
     return seq
 
 def toFasta(sequence:str, header: str, fastapath: str):
-
+    """
+    Write sequence to FASTA file.
+    """
     with open(fastapath, 'a') as file:
         file.write(f">{header}\n{sequence}\n")
 
 def toCsv(sequence: str, label: int, filepath: str = "datasets/initial.csv") -> None:
-
+    """
+    Write sequence to Csv file, add label based on coding=1 or non-coding=0.
+    """
     filepath = Path(filepath)
     exists = filepath.exists()
 
