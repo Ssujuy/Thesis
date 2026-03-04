@@ -64,7 +64,6 @@ def toDataloaders(
     DataLoader
         train, validation, test
     """
-
     dataFrame["sequence"] = dataFrame["sequence"].astype(str)
     dataFrame["label"] = dataFrame["label"].astype(int)
 
@@ -103,7 +102,6 @@ def toDataloaders(
         shuffle=True,
         num_workers=0,
         pin_memory=False,
-        drop_last=False,
     )
     validation = DataLoader(
         validationData,
@@ -194,7 +192,7 @@ def loadDatasetPercentage(datasetPath: str, percentage: int)-> DatasetDict:
     fullDataset = fullDataset.select(range(k))
 
     split = fullDataset.train_test_split(
-        test_size=Types.DEFAULT_DNABER6_TEST_SPLIT,
+        test_size=Types.DEFAULT_DNABERT6_TEST_SPLIT,
         seed=Types.DEFAULT_SMORFCNN_SEED,
     )
 
@@ -292,6 +290,9 @@ def sequenceTo1Hot(sequence: str)-> torch.Tensor:
 
         if nt not in sequenceMapping:
             raise ValueError(f"Unexpected character “{nt}” in DNA sequence!")        
+
+        if index >= Types.DEFAULT_DNABERT6_WINDOW_SIZE:
+            break
 
         encoded[index] = sequenceMapping.get(nt)
 

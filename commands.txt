@@ -29,3 +29,14 @@ python3 dataRead.py --codingFastaPath="data/coding_smORFs.fa" --nonCodingFastaPa
         --modelDirectory dnabert6_smorfs_ft \
         --sequencesPath train.csv \
         --saveFeaturesPath features.pt
+
+Extracting data from OpenPRt v1.6 NCBI RefSeq and Ensembl.
+
+python3 dataExtraction.py  \
+  --ncbiFasta NCBI_data_sOCP/GCF_000001405.40_GRCh38.p14_cds_from_genomic.fna \
+  --openProtFasta OpenProt_data_sOCP/human-openprot-r1_6-refprots+altprots+isoforms_min_2_pep-.dna.fasta \
+  --openProtBed OpenProt_data_sOCP/human-openprot-r1_6-refprots+altprots+isoforms_min_2_pep-.bed \
+  --genomeFasta NCBI_data_sOCP/GCA_000001405.29_GRCh38.p14_genomic.fna \
+  --ncRnaFasta GRCh38.ncrna_data_sOCP/Homo_sapiens.GRCh38.ncrna.fa \
+  --outPositive positive_dataset_final.fasta \
+  --outNegative negative_dataset_final.fasta

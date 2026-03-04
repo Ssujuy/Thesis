@@ -590,7 +590,7 @@ class SmORFCNN(nn.Module):
             )
         
         if self.computationalFeatures:
-            self.compFeaturesClass = ComputationalFeatures(self.trainPath)
+            self.compFeaturesClass = ComputationalFeatures("datasets/finetune.csv")
             self.compFeaturesIncrease = nn.Sequential(
                     nn.Linear(self.compFeaturesClass.input, self.compFeaturesIncreaseSize),
                     nn.BatchNorm1d(self.compFeaturesIncreaseSize),
@@ -1697,10 +1697,12 @@ class SmORFCNN(nn.Module):
             Helpers.colourPrint(Types.Colours.PURPLE, f"[SmORFCNN][{function} Epoch-{epochIndex}] End of epoch loss average={runningLoss/max(1,n):.6f}")
 
 
-mymodel = SmORFCNN(4,1536,"train.csv","feljfow",debug=False,multiStrideKernel=False)
+mymodel = SmORFCNN(4,1536,"datasets/training.csv","predict.csv",debug=False)
 #mymodel = SmORFCNN.load("smorfCNN/smorfCNN.pt")
 mymodel.initializeDataset()
-mymodel.fit(10)
+mymodel.fit(20)
+#mymodel.predict("Perdi_data_test/positive_simSorfs_Flank-100.fa", "Perdi_data_test/negative_simSorfs_Flank-100.fa")
 #mymodel.predict("CPPred_test/Human.small_coding_RNA_test.fa", "CPPred_test/Homo38.small_ncrna_test.fa")
 #mymodel.predict("csORF-finder_test_data/H.sapiens_Ribo-csORFs_testp.txt", "csORF-finder_test_data/H.sapiens_Ribo-ncsORFs_testn.txt")
 #mymodel.predict("DeepCPP_raw_data/human_mrnasorf.fa", "DeepCPP_raw_data/human_lncsorf.fa")
+#mymodel.predict("sOCP_test_data/coding_test_sOCP.fa", "sOCP_test_data/non_coding_test_sOCP.fa")
