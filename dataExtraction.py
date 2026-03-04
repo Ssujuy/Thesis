@@ -376,7 +376,7 @@ def main():
         Helpers.colourPrint(Types.Colours.GREEN,f"Saved pre-clustering sequences to: {args.outStep1}\n")
 
         Helpers.colourPrint(Types.Colours.RED,f"Could not find the expected CD-HIT output file: '{args.inCdhit}'")
-        Helpers.colourPrint(Types.Colours.WHITE,f"\Run CD-HIT command in the terminal: cd-hit -i {args.outStep1} -o {args.inCdhit} -c 0.9 -s 0.9 -T 8 -M 8000")
+        Helpers.colourPrint(Types.Colours.WHITE,f"Run CD-HIT command in the terminal: cd-hit -i {args.outStep1} -o {args.inCdhit} -c 0.9 -s 0.9 -T 8 -M 8000")
         Helpers.colourPrint(Types.Colours.WHITE,f"Once CD-HIT finishes and produces '{args.inCdhit}', re-run this script with the exact same arguments.\n")
         sys.exit(0)
 
