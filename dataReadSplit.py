@@ -59,7 +59,7 @@ def datasetSplit():
 def readFastaExtracted(codingFastaExtracted: str, nonCodingFastaExtracted: str, split: int, filepath: str = "datasets/initial.csv"):
 
     codingTest = "data/extracted/coding_smorfs_2pep_test.fa"
-    nonCodingTest = "data/extracted/non_smorfs_coding_2pep_test.fa"
+    nonCodingTest = "data/extracted/non_coding_smorfs_2pep_test.fa"
 
     directory = os.path.dirname(codingTest)
 
